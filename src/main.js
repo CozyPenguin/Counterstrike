@@ -303,7 +303,7 @@ function lanMessage(m) {
       game.hp = me.hp; player.dead = me.hp <= 0;
       hud.showSpectator(player.dead);
     }
-    hud.el.roundInfo.textContent = `LAN DEATHMATCH · ${m.players.length}/10 PLAYERS · TAB FOR SCORES`;
+    hud.el.roundInfo.textContent = `${lan.roomName || 'LAN'} · ${m.players.length}/10 PLAYERS · TAB FOR SCORES`;
   }
   if (m.type === 'shot') {
     effects.spawnTracer(new THREE.Vector3(...m.from), new THREE.Vector3(...m.to));
@@ -323,24 +323,92 @@ function leaveLAN() {
   hud.el.pauseMenu.classList.add('hidden');
   hud.el.mainMenu.classList.remove('hidden');
   document.exitPointerLock();
-  document.getElementById('lan-status').textContent = 'Disconnected. Join again to reconnect.';
+  hud.el.pauseMenu.querySelector('h2').textContent = 'PAUSED';
+  hud.el.pauseMenu.querySelector('p').textContent = 'Mouse is unlocked. Click resume to jump back in.';
+  document.getElementById('resume-btn').textContent = 'RESUME';
+  roomBrowser.classList.remove('hidden');
+  refreshRooms();
+  document.getElementById('lan-status').textContent = 'Left the room or lost connection. Choose a room to rejoin.';
 }
-document.getElementById('lan-btn').addEventListener('click', async () => {
+const roomBrowser = document.getElementById('lan-browser');
+const roomList = document.getElementById('room-list');
+const lanStatus = document.getElementById('lan-status');
+let roomRequest = 0;
+let joiningRoom = false;
+async function refreshRooms() {
+  if (roomBrowser.classList.contains('hidden') || lan) return;
+  const request = ++roomRequest;
+  try {
+    const response = await fetch('/api/rooms', { cache: 'no-store', signal: AbortSignal.timeout(5000) });
+    if (!response.ok) throw new Error('Server unavailable');
+    const data = await response.json();
+    if (request !== roomRequest) return;
+    roomList.replaceChildren();
+    if (!data.rooms.length) roomList.textContent = 'No rooms yet. Create one, then have your friends join it here.';
+    for (const room of data.rooms) {
+      const row = document.createElement('div'); row.className = 'room-row';
+      const title = document.createElement('span');
+      title.textContent = `${room.name} · ${room.players}/${room.capacity} · Dust / Deathmatch`;
+      const join = document.createElement('button');
+      join.textContent = room.players >= room.capacity ? 'FULL' : 'JOIN';
+      join.disabled = joiningRoom || room.players >= room.capacity;
+      join.addEventListener('click', () => joinRoom({ roomId: room.id }));
+      row.append(title, join); roomList.append(row);
+    }
+    const addresses = document.getElementById('host-addresses'); addresses.replaceChildren();
+    const urls = [...new Set([location.origin, ...data.addresses])];
+    for (const url of urls) {
+      const line = document.createElement('div');
+      const link = document.createElement('a'); link.href = url; link.textContent = url;
+      line.append(link); addresses.append(line);
+    }
+    if (!joiningRoom) lanStatus.textContent = 'Connected to room server · refreshes automatically';
+  } catch {
+    if (request !== roomRequest) return;
+    roomList.textContent = 'Cannot reach the room server.';
+    lanStatus.textContent = 'Run npm run dev (or npm run preview after building) on one host. All players must open that host’s URL. A static-only website cannot host rooms.';
+  }
+}
+document.getElementById('multiplayer-btn').addEventListener('click', () => {
+  roomBrowser.classList.toggle('hidden'); refreshRooms();
+});
+document.getElementById('refresh-rooms').addEventListener('click', refreshRooms);
+document.getElementById('copy-game-link').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(location.origin);
+    lanStatus.textContent = /^(localhost|127\.0\.0\.1)$/.test(location.hostname)
+      ? 'Copied, but localhost only works on this computer. Share one of the LAN IP links above with friends.'
+      : 'Game link copied. Friends open it, click Multiplayer, then join your room.';
+  } catch { lanStatus.textContent = `Copy this URL manually: ${location.origin}. For localhost, use a LAN IP link above instead.`; }
+});
+setInterval(refreshRooms, 3000);
+async function joinRoom(room) {
+  if (joiningRoom || lan) return;
+  joiningRoom = true; ++roomRequest;
   const button = document.getElementById('lan-btn');
-  const status = document.getElementById('lan-status');
-  button.disabled = true; status.textContent = 'Connecting…';
+  button.disabled = true; lanStatus.textContent = 'Connecting to room…';
   const client = new LANClient({ scene, world, onMessage: lanMessage, onClose: leaveLAN });
   try {
-    const spawn = await client.connect(document.getElementById('lan-name').value);
-    lan = client; leaveButton.hidden = false; clearBots(); effects.clear(); sound.init();
+    const spawn = await client.connect(document.getElementById('lan-name').value, room);
+    lan = client; lan.roomName = spawn.roomName;
+    leaveButton.hidden = false; clearBots(); effects.clear(); sound.init();
     game.state = 'live'; game.money = 0; game.roundTime = 115;
-    buyMenuOpen = false; paused = false;
+    buyMenuOpen = false; paused = true;
     for (const key of Object.keys(input)) input[key] = false;
     hud.showBuyMenu(false); hud.showHUD(true); hud.setScore(0, 0);
     hud.el.mainMenu.classList.add('hidden');
-    lanSpawn(spawn); lockPointer(); status.textContent = '';
-  } catch (error) { client.dispose(); status.textContent = error.message; }
-  finally { button.disabled = false; }
+    lanSpawn(spawn);
+    // Joining is asynchronous: use a fresh user gesture for pointer lock, including Firefox.
+    hud.el.pauseMenu.querySelector('h2').textContent = 'ROOM READY';
+    hud.el.pauseMenu.querySelector('p').textContent = 'Click ENTER GAME to capture your mouse. The room keeps running while this menu is open.';
+    document.getElementById('resume-btn').textContent = 'ENTER GAME';
+    hud.el.pauseMenu.classList.remove('hidden');
+    lanStatus.textContent = '';
+  } catch (error) { client.dispose(); lanStatus.textContent = error.message; }
+  finally { joiningRoom = false; button.disabled = false; }
+}
+document.getElementById('lan-btn').addEventListener('click', () => {
+  joinRoom({ createRoom: document.getElementById('room-name').value.trim() || 'LAN Room' });
 });
 const leaveButton = document.createElement('button');
 leaveButton.textContent = 'LEAVE LAN GAME';

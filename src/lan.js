@@ -7,7 +7,7 @@ export class LANClient {
     this.onMessage = onMessage; this.onClose = onClose;
     this.avatars = new Map(); this.players = []; this.elapsed = 0;
   }
-  connect(name) {
+  connect(name, room = {}) {
     return new Promise((resolve, reject) => {
       const url = new URL('/lan', window.location.href);
       url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -17,7 +17,9 @@ export class LANClient {
       this.ws.onmessage = event => {
         const m = JSON.parse(event.data);
         if (m.type === 'welcome') {
-          this.id = m.id; this.send({ type: 'join', name });
+          this.id = m.id; this.send({ type: 'join', name, ...room });
+        } else if (m.type === 'error') {
+          clearTimeout(timeout); reject(new Error(m.message)); this.ws.close();
         } else if (m.type === 'spawn' && !ready) {
           ready = true; clearTimeout(timeout); resolve(m);
         } else if (m.type === 'state') {

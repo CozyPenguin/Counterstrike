@@ -1,4 +1,6 @@
 import { WebSocketServer, WebSocket } from 'ws';
+import { networkInterfaces } from 'node:os';
+import { randomUUID } from 'node:crypto';
 import * as THREE from 'three';
 import { buildWorld, rayAABB, rayWorld } from '../src/map.js';
 
@@ -14,9 +16,26 @@ else globalThis.document = previous;
 export function attachLAN(server) {
   const wss = new WebSocketServer({ noServer: true, maxPayload: 2048 });
   const players = new Map();
+  const rooms = new Map();
+  const roomList = () => [...rooms.values()].map(room => ({
+    id: room.id, name: room.name, capacity: 10,
+    players: [...players.values()].filter(p => p.joined && p.roomId === room.id).length,
+  }));
+  const cleanRooms = () => {
+    for (const id of rooms.keys()) if (![...players.values()].some(p => p.roomId === id)) rooms.delete(id);
+  };
+  const request = (req, res) => {
+    if (req.url?.split('?')[0] !== '/api/rooms') return;
+    const port = server.address()?.port || 5173;
+    const addresses = [...new Set(Object.values(networkInterfaces()).flat()
+      .filter(a => a && a.family === 'IPv4' && !a.internal).map(a => `http://${a.address}:${port}`))];
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify({ rooms: roomList(), addresses }));
+  };
+
   let sequence = 0;
   const send = (ws, data) => { if (ws.readyState === WebSocket.OPEN && ws.bufferedAmount < 65536) ws.send(JSON.stringify(data)); };
-  const broadcast = data => { for (const ws of players.keys()) send(ws, data); };
+  const broadcast = (roomId, data) => { for (const [ws, p] of players) if (p.joined && p.roomId === roomId) send(ws, data); };
   const spawn = p => {
     const spots = [...world.spawnsCT, ...world.spawnsT];
     p.pos = spots[(sequence++) % spots.length].toArray();
@@ -30,7 +49,7 @@ export function attachLAN(server) {
   };
   server.on('upgrade', upgrade);
   wss.on('connection', ws => {
-    if (players.size >= 10) { ws.close(1013, 'Server full (10 players)'); return; }
+    if (players.size >= 100) { ws.close(1013, 'Server busy'); return; }
     const p = { id: String(++sequence), name: 'Player', kills: 0, deaths: 0, yaw: 0, joined: false };
     spawn(p); players.set(ws, p);
     send(ws, { type: 'welcome', id: p.id });
@@ -39,6 +58,17 @@ export function attachLAN(server) {
       if (!m || typeof m !== 'object') return;
       const now = Date.now(); p.seen = now;
       if (m.type === 'join' && !p.joined) {
+        let room = rooms.get(m.roomId);
+        if (m.createRoom) {
+          if (rooms.size >= 20) { send(ws, { type: 'error', message: 'Too many rooms. Join an existing room.' }); return; }
+          room = { id: randomUUID(), name: String(m.createRoom).replace(/[^a-zA-Z0-9 _-]/g, '').trim().slice(0, 32) || 'LAN Room' };
+          rooms.set(room.id, room);
+        }
+        if (!room) { send(ws, { type: 'error', message: 'This room has closed. Refresh and choose another room.' }); return; }
+        if ([...players.values()].filter(other => other.roomId === room.id).length >= 10) {
+          send(ws, { type: 'error', message: 'Room is full (10 players).' }); return;
+        }
+        p.roomId = room.id; p.roomName = room.name;
         p.name = String(m.name || 'Player').replace(/[^a-zA-Z0-9 _-]/g, '').trim().slice(0, 20) || 'Player';
         p.joined = true; send(ws, { type: 'spawn', ...p }); return;
       }
@@ -61,23 +91,23 @@ export function attachLAN(server) {
       const wall = rayWorld(origin, dir, world.colliders, 150);
       let distance = wall?.t ?? 150, victim = null, head = false;
       for (const target of players.values()) {
-        if (target === p || !target.joined || target.hp <= 0 || now < target.protectedUntil) continue;
+        if (target === p || target.roomId !== p.roomId || !target.joined || target.hp <= 0 || now < target.protectedUntil) continue;
         const [x,y,z] = target.pos;
         const box = new THREE.Box3(new THREE.Vector3(x-.32,y,z-.32), new THREE.Vector3(x+.32,y+target.height+.2,z+.32));
         const hit = rayAABB(origin, dir, box, distance);
         if (hit && hit.t < distance) { distance = hit.t; victim = target; head = hit.point.y > y + target.height - .25; }
       }
-      broadcast({ type: 'shot', id: p.id, from: origin.toArray(), to: origin.clone().addScaledVector(dir, distance).toArray() });
+      broadcast(p.roomId, { type: 'shot', id: p.id, from: origin.toArray(), to: origin.clone().addScaledVector(dir, distance).toArray() });
       if (victim) {
         victim.hp = Math.max(0, victim.hp - 36 * (head ? 4 : 1));
         send(ws, { type: 'hit', killed: victim.hp === 0 });
         if (!victim.hp) {
           victim.deaths++; p.kills++; victim.respawnAt = now + 3000;
-          broadcast({ type: 'kill', killer: p.name, victim: victim.name, head });
+          broadcast(p.roomId, { type: 'kill', killer: p.name, victim: victim.name, head });
         }
       }
     });
-    ws.on('close', () => players.delete(ws));
+    ws.on('close', () => { players.delete(ws); cleanRooms(); });
     ws.on('error', () => ws.close());
   });
   const timer = setInterval(() => {
@@ -87,9 +117,9 @@ export function attachLAN(server) {
       if (p.reloadAt && now >= p.reloadAt) { p.mag = 30; p.reloadAt = 0; }
       if (p.hp <= 0 && now >= p.respawnAt) { spawn(p); send(ws, { type: 'spawn', ...p }); }
     }
-    broadcast({ type: 'state', players: [...players.values()].filter(p => p.joined).map(({id,name,pos,yaw,hp,kills,deaths,height}) => ({id,name,pos,yaw,hp,kills,deaths,height})) });
+    for (const roomId of rooms.keys()) broadcast(roomId, { type: 'state', players: [...players.values()].filter(p => p.joined && p.roomId === roomId).map(({id,name,pos,yaw,hp,kills,deaths,height}) => ({id,name,pos,yaw,hp,kills,deaths,height})) });
   }, 50);
-  const close = () => { clearInterval(timer); server.off('upgrade', upgrade); for (const ws of players.keys()) ws.terminate(); wss.close(); };
+  const close = () => { clearInterval(timer); server.off('upgrade', upgrade); server.off('request', request); for (const ws of players.keys()) ws.terminate(); wss.close(); };
   server.once('close', close);
-  return { close, wss };
+  return { close, wss, request };
 }
