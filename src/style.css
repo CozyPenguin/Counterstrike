@@ -847,6 +847,10 @@ input[type="range"] {
 .room-heading, .room-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .room-heading { margin-top: 18px; }
 .room-row { border-bottom: 1px solid #7776; padding: 10px 0; font-size: 13px; }
+.lan-method { margin-top: 16px; }
+.lan-method label { margin-bottom: 8px; }
+#lan-browser .seg button { font-size: 11px; padding: 7px 14px; letter-spacing: 2px; }
+#lan-method-hint { color: #9fb0bb; line-height: 1.5; }
 #room-list { padding: 12px 0; color: #e0e6eb; font-size: 14px; }
 #host-addresses a { color: #efc477; overflow-wrap: anywhere; }
 #lan-browser details { margin-top: 12px; font-size: 13px; color: #d1d5db; }

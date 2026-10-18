@@ -7,6 +7,7 @@ import { Effects } from './effects.js';
 import { HUD } from './hud.js';
 import { Sound } from './audio.js';
 import { LANClient } from './lan.js';
+import { P2PClient } from './webrtc.js';
 import { skyTexture } from './textures.js';
 import { MAP_LIST, buildMap } from './maps/index.js';
 import { settings, QUALITY_PRESETS } from './settings.js';
@@ -155,7 +156,7 @@ function clearMapFromScene() {
   }
 }
 
-function rebuildMap(mapId) {
+function rebuildMap(mapId, { persist = true } = {}) {
   clearBots();
   effects.clear();
   clearMapFromScene();
@@ -168,7 +169,7 @@ function rebuildMap(mapId) {
   effects.world = world;
   applyGraphicsSettings();
   player.respawn(world.spawnsCT[2], 0);
-  settings.set('lastMap', mapId);
+  if (persist) settings.set('lastMap', mapId);
 }
 
 // ================= Game state =================
@@ -505,6 +506,21 @@ document.addEventListener('pointerlockerror', () => {
 
 
 // LAN deathmatch runs continuously on the host, even when a browser releases its mouse.
+
+/** Multiplayer rooms always run on Dustline so every player shares the map. */
+function ensureMultiplayerMap() {
+  if (activeMapId === 'dust') return;
+  rebuildMap('dust', { persist: false });
+  hud.announce('MAP: DUSTLINE', 'neutral', 1.6);
+}
+
+/** Show a short status line in the multiplayer panel (and in the HUD). */
+function setLanStatus(text) {
+  if (!text) return;
+  if (lanStatus) lanStatus.textContent = text;
+  hud.announce(text.toUpperCase(), 'neutral', 2.4);
+}
+
 function lanSpawn(message) {
   player.respawn(new THREE.Vector3(...message.pos), 0);
   game.hp = 100; game.armor = 0;
@@ -524,7 +540,7 @@ function lanMessage(m) {
       game.hp = me.hp; player.dead = me.hp <= 0;
       hud.showSpectator(player.dead);
     }
-    hud.el.roundInfo.textContent = `${lan.roomName || 'LAN'} · ${m.players.length}/10 PLAYERS · TAB FOR SCORES`;
+    hud.el.roundInfo.textContent = `${lan.roomName || 'LAN'} · ${lan.method === 'webrtc' ? 'P2P' : 'RELAY'} · ${m.players.length}/10 PLAYERS · TAB FOR SCORES`;
   }
   if (m.type === 'shot') {
     effects.spawnTracer(new THREE.Vector3(...m.from), new THREE.Vector3(...m.to));
@@ -554,8 +570,27 @@ function leaveLAN() {
 const roomBrowser = document.getElementById('lan-browser');
 const roomList = document.getElementById('room-list');
 const lanStatus = document.getElementById('lan-status');
+const methodHint = document.getElementById('lan-method-hint');
 let roomRequest = 0;
 let joiningRoom = false;
+// 'server'  -> every message is relayed by the game server
+// 'webrtc'  -> the players talk to each other directly, the server only
+//              introduces them (WebRTC handshake)
+let selectedMethod = 'server';
+const methodButtons = [...document.querySelectorAll('#lan-method button')];
+function setMethod(method) {
+  selectedMethod = method === 'webrtc' ? 'webrtc' : 'server';
+  for (const button of methodButtons) button.classList.toggle('on', button.dataset.val === selectedMethod);
+  if (methodHint) {
+    methodHint.textContent = selectedMethod === 'webrtc'
+      ? 'Direct peer-to-peer play: the room host runs the game and the traffic goes straight to the other players over WebRTC.'
+      : 'Relayed play: every message travels through the host’s game server.';
+  }
+}
+for (const button of methodButtons) {
+  button.addEventListener('click', () => setMethod(button.dataset.val));
+}
+setMethod('server');
 async function refreshRooms() {
   if (roomBrowser.classList.contains('hidden') || lan) return;
   const request = ++roomRequest;
@@ -569,11 +604,12 @@ async function refreshRooms() {
     for (const room of data.rooms) {
       const row = document.createElement('div'); row.className = 'room-row';
       const title = document.createElement('span');
-      title.textContent = `${room.name} · ${room.players}/${room.capacity} · Dust / Deathmatch`;
+      const p2p = room.method === 'webrtc';
+      title.textContent = `${room.name} · ${room.players}/${room.capacity} · ${p2p ? 'WEBRTC P2P' : 'RELAY'} · Dust / Deathmatch`;
       const join = document.createElement('button');
       join.textContent = room.players >= room.capacity ? 'FULL' : 'JOIN';
       join.disabled = joiningRoom || room.players >= room.capacity;
-      join.addEventListener('click', () => joinRoom({ roomId: room.id }));
+      join.addEventListener('click', () => joinRoom({ roomId: room.id, method: room.method }));
       row.append(title, join); roomList.append(row);
     }
     const addresses = document.getElementById('host-addresses'); addresses.replaceChildren();
@@ -607,11 +643,20 @@ async function joinRoom(room) {
   if (joiningRoom || lan) return;
   joiningRoom = true; ++roomRequest;
   const button = document.getElementById('lan-btn');
-  button.disabled = true; lanStatus.textContent = 'Connecting to room…';
-  const client = new LANClient({ scene, world, onMessage: lanMessage, onClose: leaveLAN });
+  button.disabled = true;
+  const method = room.method === 'webrtc' ? 'webrtc' : 'server';
+  lanStatus.textContent = method === 'webrtc'
+    ? 'Negotiating a direct WebRTC connection…'
+    : 'Connecting to room…';
+  // Multiplayer always runs on Dustline so every player shares one map.
+  ensureMultiplayerMap();
+  const name = document.getElementById('lan-name').value;
+  const client = method === 'webrtc'
+    ? new P2PClient({ scene, world, onMessage: lanMessage, onClose: leaveLAN, onStatus: setLanStatus })
+    : new LANClient({ scene, world, onMessage: lanMessage, onClose: leaveLAN });
   try {
-    const spawn = await client.connect(document.getElementById('lan-name').value, room);
-    lan = client; lan.roomName = spawn.roomName;
+    const spawn = await client.connect(name, room);
+    lan = client; lan.roomName = spawn.roomName; lan.method = method;
     leaveButton.hidden = false; clearBots(); effects.clear(); sound.init();
     game.state = 'live'; game.money = 0; game.roundTime = 115;
     buyMenuOpen = false; paused = true;
@@ -629,7 +674,10 @@ async function joinRoom(room) {
   finally { joiningRoom = false; button.disabled = false; }
 }
 document.getElementById('lan-btn').addEventListener('click', () => {
-  joinRoom({ createRoom: document.getElementById('room-name').value.trim() || 'LAN Room' });
+  joinRoom({
+    createRoom: document.getElementById('room-name').value.trim() || 'LAN Room',
+    method: selectedMethod,
+  });
 });
 const leaveButton = document.createElement('button');
 leaveButton.textContent = 'LEAVE LAN GAME';

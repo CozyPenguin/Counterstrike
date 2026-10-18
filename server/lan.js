@@ -2,7 +2,8 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { networkInterfaces } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import * as THREE from 'three';
-import { buildWorld, rayAABB, rayWorld } from '../src/map.js';
+import { buildWorld } from '../src/map.js';
+import { Room, ROOM_CAPACITY } from '../src/room.js';
 
 // World generation also creates procedural textures; no pixels are needed by the server.
 const context = new Proxy({}, { get: (_, key) => key.startsWith('create')
@@ -13,16 +14,20 @@ const world = buildWorld(new THREE.Scene());
 if (previous === undefined) delete globalThis.document;
 else globalThis.document = previous;
 
+const clean = value => String(value ?? '').replace(/[^a-zA-Z0-9 _-]/g, '').trim();
+
 export function attachLAN(server) {
-  const wss = new WebSocketServer({ noServer: true, maxPayload: 2048 });
-  const players = new Map();
-  const rooms = new Map();
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 256 * 1024 });
+  const players = new Map();     // ws -> player
+  const byId = new Map();        // player id -> player
+  const rooms = new Map();       // room id -> room
+
   const roomList = () => [...rooms.values()].map(room => ({
-    id: room.id, name: room.name, capacity: 10,
-    players: [...players.values()].filter(p => p.joined && p.roomId === room.id).length,
+    id: room.id, name: room.name, capacity: room.capacity, method: room.method,
+    players: room.members.size,
   }));
   const cleanRooms = () => {
-    for (const id of rooms.keys()) if (![...players.values()].some(p => p.roomId === id)) rooms.delete(id);
+    for (const id of rooms.keys()) if (!rooms.get(id).members.size) rooms.delete(id);
   };
   const request = (req, res) => {
     if (req.url?.split('?')[0] !== '/api/rooms') return;
@@ -34,92 +39,159 @@ export function attachLAN(server) {
   };
 
   let sequence = 0;
+  let spawnCounter = 0;
   const send = (ws, data) => { if (ws.readyState === WebSocket.OPEN && ws.bufferedAmount < 65536) ws.send(JSON.stringify(data)); };
-  const broadcast = (roomId, data) => { for (const [ws, p] of players) if (p.joined && p.roomId === roomId) send(ws, data); };
-  const spawn = p => {
-    const spots = [...world.spawnsCT, ...world.spawnsT];
-    p.pos = spots[(sequence++) % spots.length].toArray();
-    p.hp = 100; p.mag = 30; p.reloadAt = 0; p.lastShot = 0; p.height = 1.75;
-    p.protectedUntil = Date.now() + 2000;
-    p.lastMove = Date.now();
+  const broadcast = (roomId, data) => {
+    for (const [ws, p] of players) if (p.joined && p.roomId === roomId) send(ws, data);
   };
+  const deliver = (playerId, data) => {
+    const target = byId.get(playerId);
+    if (target) send(target.ws, data);
+  };
+  /** Tell every member of a peer-to-peer room who is in it and who hosts it. */
+  const broadcastRoster = room => {
+    const members = [...room.members]
+      .map(id => byId.get(id))
+      .filter(Boolean)
+      .map(p => ({ id: p.id, name: p.name }));
+    for (const p of players.values()) {
+      if (p.joined && p.roomId === room.id) {
+        send(p.ws, { type: 'rtc-roster', hostId: room.hostId, members, roomId: room.id, roomName: room.name, you: p.id });
+      }
+    }
+  };
+  const spawnPoint = () => {
+    const spots = [...world.spawnsCT, ...world.spawnsT];
+    return spots[spawnCounter++ % spots.length].toArray();
+  };
+
   const upgrade = (req, socket, head) => {
     if (req.url?.split('?')[0] !== '/lan') return;
     wss.handleUpgrade(req, socket, head, ws => wss.emit('connection', ws));
   };
   server.on('upgrade', upgrade);
+
   wss.on('connection', ws => {
     if (players.size >= 100) { ws.close(1013, 'Server busy'); return; }
-    const p = { id: String(++sequence), name: 'Player', kills: 0, deaths: 0, yaw: 0, joined: false };
-    spawn(p); players.set(ws, p);
+    const p = { id: String(++sequence), name: 'Player', kills: 0, deaths: 0, yaw: 0, joined: false, method: 'server', roomId: null, seen: Date.now(), ws };
+    players.set(ws, p);
+    byId.set(p.id, p);
     send(ws, { type: 'welcome', id: p.id });
     ws.on('message', raw => {
       let m; try { m = JSON.parse(raw); } catch { return; }
       if (!m || typeof m !== 'object') return;
       const now = Date.now(); p.seen = now;
+
       if (m.type === 'join' && !p.joined) {
+        const method = m.method === 'webrtc' ? 'webrtc' : 'server';
         let room = rooms.get(m.roomId);
         if (m.createRoom) {
           if (rooms.size >= 20) { send(ws, { type: 'error', message: 'Too many rooms. Join an existing room.' }); return; }
-          room = { id: randomUUID(), name: String(m.createRoom).replace(/[^a-zA-Z0-9 _-]/g, '').trim().slice(0, 32) || 'LAN Room' };
+          room = {
+            id: randomUUID(),
+            name: clean(m.createRoom).slice(0, 32) || 'LAN Room',
+            capacity: ROOM_CAPACITY,
+            method,
+            hostId: null,
+            members: new Set(),
+            sim: method === 'server' ? new Room(world, { capacity: ROOM_CAPACITY }) : null,
+          };
           rooms.set(room.id, room);
         }
         if (!room) { send(ws, { type: 'error', message: 'This room has closed. Refresh and choose another room.' }); return; }
-        if ([...players.values()].filter(other => other.roomId === room.id).length >= 10) {
-          send(ws, { type: 'error', message: 'Room is full (10 players).' }); return;
+        if (room.members.size >= room.capacity) {
+          send(ws, { type: 'error', message: `Room is full (${room.capacity} players).` }); return;
         }
-        p.roomId = room.id; p.roomName = room.name;
-        p.name = String(m.name || 'Player').replace(/[^a-zA-Z0-9 _-]/g, '').trim().slice(0, 20) || 'Player';
-        p.joined = true; send(ws, { type: 'spawn', ...p }); return;
-      }
-      if (!p.joined || p.hp <= 0) return;
-      if (m.type === 'move' && Array.isArray(m.pos) && m.pos.length === 3 && m.pos.every(Number.isFinite) && Number.isFinite(m.yaw)) {
-        const next = new THREE.Vector3(...m.pos), old = new THREE.Vector3(...p.pos);
-        const allowance = Math.min(1, (now - p.lastMove) / 1000) * 9 + 0.5;
-        if (Math.abs(next.x) > 34 || Math.abs(next.z) > 34 || next.y < -1 || next.y > 12 || next.distanceTo(old) > allowance) {
-          send(ws, { type: 'correct', pos: p.pos }); return;
+        p.roomId = room.id; p.roomName = room.name; p.method = room.method;
+        p.name = clean(m.name).slice(0, 20) || 'Player';
+        p.joined = true;
+        room.members.add(p.id);
+        if (room.method === 'webrtc') {
+          // The creator of a peer-to-peer room hosts it; if the host leaves,
+          // the next member is promoted.
+          if (!room.hostId) room.hostId = p.id;
+          p.pos = spawnPoint();
+          send(ws, { type: 'spawn', id: p.id, name: p.name, pos: p.pos, hp: 100, mag: 30, roomId: room.id, roomName: room.name });
+          broadcastRoster(room);
+        } else {
+          const player = room.sim.add(p.id, p.name, { roomId: room.id, roomName: room.name });
+          send(ws, room.sim.payload(player));
+          broadcast(room.id, { type: 'state', players: room.sim.snapshot() });
         }
-        p.pos = m.pos; p.yaw = m.yaw; p.height = m.crouch ? 1.05 : 1.75; p.lastMove = now;
+        return;
       }
-      if (m.type === 'reload' && !p.reloadAt && p.mag < 30) p.reloadAt = now + 2400;
-      if (m.type !== 'shot' || p.reloadAt || !p.mag || now - p.lastShot < 95) return;
-      if (!Array.isArray(m.dir) || m.dir.length !== 3 || !m.dir.every(Number.isFinite)) return;
-      const dir = new THREE.Vector3(...m.dir);
-      if (Math.abs(dir.length() - 1) > 0.01) return;
-      p.lastShot = now; p.mag--;
-      const origin = new THREE.Vector3(...p.pos); origin.y += p.height + 0.12;
-      const wall = rayWorld(origin, dir, world.colliders, 150);
-      let distance = wall?.t ?? 150, victim = null, head = false;
-      for (const target of players.values()) {
-        if (target === p || target.roomId !== p.roomId || !target.joined || target.hp <= 0 || now < target.protectedUntil) continue;
-        const [x,y,z] = target.pos;
-        const box = new THREE.Box3(new THREE.Vector3(x-.32,y,z-.32), new THREE.Vector3(x+.32,y+target.height+.2,z+.32));
-        const hit = rayAABB(origin, dir, box, distance);
-        if (hit && hit.t < distance) { distance = hit.t; victim = target; head = hit.point.y > y + target.height - .25; }
-      }
-      broadcast(p.roomId, { type: 'shot', id: p.id, from: origin.toArray(), to: origin.clone().addScaledVector(dir, distance).toArray() });
-      if (victim) {
-        victim.hp = Math.max(0, victim.hp - 36 * (head ? 4 : 1));
-        send(ws, { type: 'hit', killed: victim.hp === 0 });
-        if (!victim.hp) {
-          victim.deaths++; p.kills++; victim.respawnAt = now + 3000;
-          broadcast(p.roomId, { type: 'kill', killer: p.name, victim: victim.name, head });
+
+      if (!p.joined) return;
+      const room = rooms.get(p.roomId);
+      if (!room) return;
+
+      // ---- WebRTC signalling (peer-to-peer rooms) ----
+      if (m.type === 'rtc') {
+        if (room.method !== 'webrtc') return;
+        const payload = m.payload;
+        if (!payload || typeof payload !== 'object') return;
+        if (m.to) {
+          const target = byId.get(m.to);
+          if (target && target.roomId === p.roomId) send(target.ws, { type: 'rtc', from: p.id, to: m.to, payload });
+        } else {
+          for (const other of players.values()) {
+            if (other !== p && other.joined && other.roomId === p.roomId) {
+              send(other.ws, { type: 'rtc', from: p.id, payload });
+            }
+          }
         }
+        return;
+      }
+      if (m.type === 'ping') return;
+
+      // ---- relayed rooms: the server stays authoritative ----
+      if (!room.sim) return;
+      const events = room.sim.handle(p.id, m);
+      for (const event of events) {
+        if (event.to === '*') broadcast(p.roomId, event.message);
+        else deliver(event.to, event.message);
       }
     });
-    ws.on('close', () => { players.delete(ws); cleanRooms(); });
+    ws.on('close', () => {
+      players.delete(ws); byId.delete(p.id);
+      const room = rooms.get(p.roomId);
+      if (room) {
+        room.members.delete(p.id);
+        room.sim?.remove(p.id);
+        if (room.method === 'webrtc' && room.hostId === p.id) {
+          // Promote the next member so the room keeps running.
+          const next = room.members.values().next().value;
+          room.hostId = next ?? null;
+        }
+        if (room.method === 'webrtc') broadcastRoster(room);
+      }
+      cleanRooms();
+    });
     ws.on('error', () => ws.close());
   });
+
   const timer = setInterval(() => {
     const now = Date.now();
-    for (const [ws,p] of players) {
-      if (now - (p.seen || p.lastMove) > 30000) { ws.terminate(); continue; }
-      if (p.reloadAt && now >= p.reloadAt) { p.mag = 30; p.reloadAt = 0; }
-      if (p.hp <= 0 && now >= p.respawnAt) { spawn(p); send(ws, { type: 'spawn', ...p }); }
+    for (const [ws, p] of players) {
+      if (now - (p.seen || now) > (p.method === 'webrtc' ? 60000 : 30000)) { ws.terminate(); continue; }
     }
-    for (const roomId of rooms.keys()) broadcast(roomId, { type: 'state', players: [...players.values()].filter(p => p.joined && p.roomId === roomId).map(({id,name,pos,yaw,hp,kills,deaths,height}) => ({id,name,pos,yaw,hp,kills,deaths,height})) });
+    for (const room of rooms.values()) {
+      if (!room.sim) continue;
+      for (const event of room.sim.tick(now)) {
+        if (event.to === '*') broadcast(room.id, event.message);
+        else deliver(event.to, event.message);
+      }
+      broadcast(room.id, { type: 'state', players: room.sim.snapshot() });
+    }
   }, 50);
-  const close = () => { clearInterval(timer); server.off('upgrade', upgrade); server.off('request', request); for (const ws of players.keys()) ws.terminate(); wss.close(); };
+
+  const close = () => {
+    clearInterval(timer);
+    server.off('upgrade', upgrade);
+    server.off('request', request);
+    for (const ws of players.keys()) ws.terminate();
+    wss.close();
+  };
   server.once('close', close);
   return { close, wss, request };
 }
