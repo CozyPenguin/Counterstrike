@@ -115,6 +115,7 @@
       <button id="play-btn">CLICK TO PLAY</button>
       <button id="multiplayer-btn">MULTIPLAYER</button>
       <button id="settings-btn" class="secondary-btn">SETTINGS</button>
+      <button id="practice-btn" class="secondary-btn">PRACTICE RANGE</button>
       <section id="lan-browser" class="lan-menu hidden" aria-label="Multiplayer rooms">
         <h2>LAN ROOMS</h2>
         <label for="lan-name">Your name</label>
@@ -225,6 +226,17 @@
         </thead>
         <tbody id="scoreboard-body"></tbody>
       </table>
+    </div>
+  </div>
+
+  <!-- ======== PRACTICE RANGE HUD ======== -->
+  <div id="practice-hud" class="hidden">
+    <div class="practice-hud-inner">
+      <div class="practice-stat"><b>WEAPON</b><span id="practice-weapon">AK-47</span></div>
+      <div class="practice-stat"><b>HITS</b><span id="practice-hits">0</span></div>
+      <div class="practice-stat"><b>SHOTS</b><span id="practice-shots">0</span></div>
+      <div class="practice-stat"><b>ACCURACY</b><span id="practice-acc">--</span></div>
+      <div class="practice-stat practice-hint"><b>HINT</b><span id="practice-hint">pull DOWN to control recoil</span></div>
     </div>
   </div>
 

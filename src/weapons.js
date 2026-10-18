@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { getRecoilPattern, recoilForShot } from './recoil.js';
 
 /**
  * Weapon definitions. Spread/recoil in radians. Damage is per-bullet base damage
@@ -184,10 +185,16 @@ export class WeaponSystem {
     this.kick = 0;           // viewmodel punchback
     this.recoverPitch = 0;
     this.recoverYaw = 0;
-    this.shotIndex = 0;      // for recoil pattern
+    this.shotIndex = 0;      // index into the recoil pattern (resets between sprays)
     this.timeSinceShot = 99;
     this.spread = 0;
     this.zoomed = false;
+    // Valorant-style: track when the current spray started, and a separate
+    // "uncompensated residual" so the camera can auto-recover between bursts.
+    this.sprayT0 = -Infinity;
+    this.sprayActive = false;
+    this.recoilResidualPitch = 0;
+    this.recoilResidualYaw = 0;
 
     this.viewModel = buildViewModel('knife');
     this.viewModel.position.set(0.26, -0.27, -0.5);
@@ -341,15 +348,26 @@ export class WeaponSystem {
     // ---- ammo ----
     if (d.mag !== Infinity) this.current.mag -= 1;
 
-    // ---- recoil kick to camera ----
-    const t = Math.min(this.shotIndex, 9);
-    const upKick = d.recoil.up * (1 + t * 0.09);
-    const sideKick = d.recoil.side * (Math.sin(this.shotIndex * 2.4) * 0.9 + (Math.random() - 0.5) * 0.8);
-    player.pitch += upKick * (this.zoomed ? 1.6 : 1);
-    player.yaw += sideKick * (this.zoomed ? 1.2 : 1);
-    this.recoverPitch += upKick * (this.zoomed ? 1.6 : 1);
-    this.recoverYaw += sideKick * (this.zoomed ? 1.2 : 1);
-    this.shotIndex = (this.shotIndex + 1) % 40;
+    // ---- VALORANT-STYLE RECOIL ----
+    // A new spray starts whenever there's been a gap of more than 0.18s
+    // since the last shot (long enough to count as "I let go of the trigger
+    // and re-aimed"). Within a spray, shotIndex counts up so the per-shot
+    // delta comes from the fixed pattern. The player has to apply the
+    // inverse (pull-down) with their mouse to keep the spray on target.
+    const pattern = getRecoilPattern(d.id);
+    if (this.timeSinceShot > 0.18 || this.shotIndex >= pattern.climb.length) {
+      this.shotIndex = 0;
+      this.sprayT0 = performance.now() / 1000;
+    }
+    const { dYaw, dPitch } = recoilForShot(pattern, this.shotIndex, this.shotIndex === 0);
+    const zoom = this.zoomed ? 1.6 : 1;
+    player.pitch += dPitch * zoom;
+    player.yaw   += dYaw   * zoom;
+    this.recoverPitch += dPitch * zoom;
+    this.recoverYaw   += dYaw   * zoom;
+    this.recoilResidualPitch += dPitch * zoom;
+    this.recoilResidualYaw   += dYaw   * zoom;
+    this.shotIndex = (this.shotIndex + 1) % pattern.climb.length;
     this.kick = 1;
     this.flashTimer = 0.05;
 
@@ -387,12 +405,26 @@ export class WeaponSystem {
 
   /** Recover some recoil pitch/yaw. Returns [dPitch, dYaw] to subtract from player look. */
   recover(dt) {
+    // Standard per-frame easing toward zero (the "where the crosshair wants
+    // to be" residual). Kept from the original implementation.
     const rate = 1 - Math.exp(-7.5 * dt);
     const dp = this.recoverPitch * rate;
     const dy = this.recoverYaw * rate;
     this.recoverPitch -= dp;
     this.recoverYaw -= dy;
-    return [dp, dy];
+
+    // Valorant-style: between bursts, the camera continues to settle
+    // toward the original aim point at the per-weapon recovery rate. We
+    // apply the pattern's recovery on top of the standard easing so the
+    // gun feels "magnetic" — pull down hard, release, the crosshair comes
+    // back to where you started.
+    const pattern = getRecoilPattern(this.current.def.id);
+    const rec = pattern.recovery * dt;
+    const dResP = this.recoilResidualPitch * Math.min(1, rec);
+    const dResY = this.recoilResidualYaw   * Math.min(1, rec);
+    this.recoilResidualPitch -= dResP;
+    this.recoilResidualYaw   -= dResY;
+    return [dp + dResP, dy + dResY];
   }
 
   update(dt, player, moving) {

@@ -10,6 +10,8 @@ import { LANClient } from './lan.js';
 import { skyTexture } from './textures.js';
 import { MAP_LIST, buildMap } from './maps/index.js';
 import { settings, QUALITY_PRESETS } from './settings.js';
+import { getRecoilPattern, verticalCompensationPerSecond } from './recoil.js';
+import { PracticeRange } from './practice.js';
 
 // ================= Renderer / Scene =================
 
@@ -121,6 +123,10 @@ hud.setMapList(MAP_LIST, activeMapId);
 // Apply initial graphics + audio settings
 applyGraphicsSettings();
 sound.setVolume(settings.get('volume'));
+
+const practice = new PracticeRange(scene, camera, weapons, sound, player);
+practice.setHUD(hud);
+practice.build();
 
 player.respawn(world.spawnsCT[2], 0);
 
@@ -274,6 +280,24 @@ window.addEventListener('keydown', (e) => {
     case 'Digit8': if (buyMenuOpen) buyByKey('8'); break;
     case 'Digit9': if (buyMenuOpen) buyByKey('9'); break;
     case 'Digit0': if (buyMenuOpen) buyByKey('0'); break;
+    case 'KeyP':
+      if (game.state === 'menu') {
+        startPractice();
+        e.preventDefault();
+      } else if (game.state === 'practice') {
+        endPractice();
+        e.preventDefault();
+      }
+      break;
+    case 'Escape':
+      if (game.state === 'practice') {
+        endPractice();
+        e.preventDefault();
+      } else if (buyMenuOpen) {
+        toggleBuyMenu();
+        e.preventDefault();
+      }
+      break;
     default: break;
   }
 });
@@ -344,6 +368,56 @@ document.getElementById('play-btn').addEventListener('click', () => {
   lockPointer();
   startMatch();
 });
+
+document.getElementById('practice-btn').addEventListener('click', () => {
+  startPractice();
+});
+
+function startPractice() {
+  sound.init();
+  hud.el.mainMenu.classList.add('hidden');
+  hud.showHUD(true);
+  // Reset match state
+  game.state = 'practice';
+  game.round = 0;
+  game.scoreCT = 0;
+  game.scoreT = 0;
+  game.money = 0;
+  game.hp = 100;
+  game.armor = 0;
+  game.helmet = false;
+  game.matchOver = false;
+  // Give the player a default rifle + pistol for practice (so they can
+  // compare AK vs M4 spray without buying).
+  weapons.giveWeapon('ak47');
+  weapons.giveWeapon('usp');
+  // Swap the player's collision world to the practice range (so they
+  // can't fall through the floor or out of the room).
+  player.world = { colliders: practice.colliders };
+  practice.start();
+  // Show the per-weapon pull-down hint
+  const def = weapons.current.def;
+  const pat = getRecoilPattern(def.id);
+  hud.setPracticeWeapon(def.name.toUpperCase(), verticalCompensationPerSecond(pat, def.rpm));
+  hud.resetPracticeStats();
+  hud.showPractice(true);
+  lockPointer();
+}
+
+function endPractice() {
+  practice.stop();
+  // Restore the player's collision world to the active map
+  player.world = world;
+  // Drop any practice-only weapons the player grabbed
+  weapons.slots.primary = null;
+  weapons.slots.pistol = null;
+  weapons.selectSlot('knife');
+  game.state = 'menu';
+  hud.el.mainMenu.classList.remove('hidden');
+  hud.showHUD(false);
+  hud.showPractice(false);
+  document.exitPointerLock();
+}
 
 document.getElementById('resume-btn').addEventListener('click', () => {
   lockPointer();
@@ -759,6 +833,28 @@ function applyDamageToBot(bot, rawDamage, part, armorPen) {
 }
 
 function resolvePlayerShot(shot) {
+  // ---- Practice range short-circuit ----
+  if (game.state === 'practice') {
+    const practiceHit = practice.testRay(shot.origin, shot.dir, shot.range);
+    const fwd = new THREE.Vector3();
+    camera.getWorldDirection(fwd);
+    const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0)).normalize();
+    const muzzle = camera.position.clone()
+      .addScaledVector(fwd, 0.55)
+      .addScaledVector(right, 0.16)
+      .add(new THREE.Vector3(0, -0.12, 0));
+    if (practiceHit) {
+      practice.registerHit(practiceHit.part);
+      effects.spawnTracer(muzzle, practiceHit.point);
+      hud.showHitmarker(practiceHit.part === 'head');
+    } else {
+      // missed: tracer keeps going past the targets
+      const farEnd = shot.origin.clone().addScaledVector(shot.dir, shot.range);
+      effects.spawnTracer(muzzle, farEnd);
+    }
+    return;
+  }
+
   let bestBot = null;
   let bestT = Infinity;
   let bestPart = null;
@@ -897,13 +993,34 @@ function botShoot(bot) {
   hitChance = Math.max(0.1, Math.min(0.74, hitChance));
 
   const hit = Math.random() < hitChance;
-  const end = to.clone();
+
+  // Valorant-style miss: rather than a uniform random cloud, the bullet
+  // drifts along the AK spray pattern (climb) the further the bot has
+  // been firing into its burst. Bot "skill" cuts the magnitude of that
+  // drift so good bots only miss by a little, bad bots spray into the
+  // sky. Bots can be considered to be "applying partial compensation".
+  let end = to.clone();
   if (!hit) {
-    end.add(new THREE.Vector3(
-      (Math.random() - 0.5) * (0.6 + dist * 0.028),
-      (Math.random() - 0.5) * (0.6 + dist * 0.028),
-      (Math.random() - 0.5) * (0.6 + dist * 0.028)
-    ));
+    // Look up the bot's per-burst shot index — bots get a per-bot spray
+    // counter that resets on the same gap as the player's.
+    if (bot.shotSinceSpray === undefined || bot.shotSinceSpray > 30) bot.shotSinceSpray = 0;
+    const idx = bot.shotSinceSpray;
+    bot.shotSinceSpray++;
+    const pat = getRecoilPattern('ak47');
+    const climb = pat.climb[Math.min(idx, pat.climb.length - 1)];
+    // Distance-scaled vertical drift: at close range the bot's miss is
+    // mostly horizontal (it's pointing roughly right), at long range the
+    // climb is huge in radians. Distance factor translates radians to
+    // world units at the target's distance.
+    const skillScale = 0.55 + 0.45 * Math.random(); // partial "compensation"
+    const verticalDrift = (climb.p * (1 + idx * 0.06)) * dist * skillScale;
+    const horizontalDrift = (climb.y * (1 + idx * 0.06)) * dist * skillScale;
+    // Add a small random component on top so misses don't look perfectly
+    // deterministic from the player's view.
+    const jitter = 0.18 + dist * 0.018;
+    end.x += horizontalDrift + (Math.random() - 0.5) * jitter;
+    end.y += verticalDrift   + (Math.random() - 0.5) * jitter;
+    end.z += (Math.random() - 0.5) * jitter;
   }
   effects.spawnTracer(from, end, 0xffd0a0);
 
@@ -955,7 +1072,7 @@ function update() {
   }
 
   // ---- player ----
-  const canMove = !frozen && (game.state === 'buy' || game.state === 'live') && !player.dead;
+  const canMove = !frozen && (game.state === 'buy' || game.state === 'live' || game.state === 'practice') && !player.dead;
   const playerInput = { ...input, crouch: input.crouch };
   if (dt > 0) {
     const wasDead = player.dead;
@@ -964,7 +1081,7 @@ function update() {
   }
 
   // ---- firing ----
-  if (!frozen && game.state === 'live' && !player.dead && !buyMenuOpen) {
+  if (!frozen && (game.state === 'live' || game.state === 'practice') && !player.dead && !buyMenuOpen) {
     const def = weapons.current.def;
     const wantFire = def.auto ? input.fire : input.firePressed;
     if (wantFire) {
@@ -973,6 +1090,12 @@ function update() {
         if (lan) lan.send({ type: 'shot', dir: shot.dir.toArray() });
         else resolvePlayerShot(shot);
       }
+    }
+    // Update the practice pull-down hint when the equipped weapon changes
+    if (game.state === 'practice' && practice._lastWeaponId !== def.id) {
+      practice._lastWeaponId = def.id;
+      const pat = getRecoilPattern(def.id);
+      hud.setPracticeWeapon(def.name.toUpperCase(), verticalCompensationPerSecond(pat, def.rpm));
     }
   }
   input.firePressed = false;

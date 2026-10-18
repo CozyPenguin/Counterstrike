@@ -38,6 +38,12 @@ export class HUD {
       spectator: $('spectator-note'),
       scope: $('scope'),
       deployBtn: $('deploy-btn'),
+      practiceHud: $('practice-hud'),
+      practiceWeapon: $('practice-weapon'),
+      practiceHits: $('practice-hits'),
+      practiceShots: $('practice-shots'),
+      practiceAcc: $('practice-acc'),
+      practiceHint: $('practice-hint'),
     };
 
     this.el.deployBtn.addEventListener('click', () => {
@@ -354,6 +360,42 @@ export class HUD {
   showSettings(show) {
     const panel = document.getElementById('settings-panel');
     if (panel) panel.classList.toggle('hidden', !show);
+  }
+
+  // ============== Practice range ==============
+
+  showPractice(show) {
+    if (this.el.practiceHud) this.el.practiceHud.classList.toggle('hidden', !show);
+  }
+
+  setPracticeWeapon(name, pullDownPerSecRad) {
+    if (this.el.practiceWeapon) this.el.practiceWeapon.textContent = name;
+    if (this.el.practiceHint) {
+      // Convert rad/sec to a friendly "px down per second" number so the
+      // player can translate it to mouse input. Assumes 78° FOV at 1080p
+      // and a sensitivity of 1; gives a rough number that's still useful
+      // as a coaching hint.
+      const pxPerSec = Math.round(pullDownPerSecRad * 1080 / (Math.PI * 0.4));
+      this.el.practiceHint.textContent = pullDownPerSecRad > 0
+        ? `pull DOWN ≈ ${pxPerSec}px/s to fully compensate`
+        : 'tap fire — no compensation needed';
+    }
+  }
+
+  setPracticeStats(hits, shots, lastPart) {
+    if (this.el.practiceHits) this.el.practiceHits.textContent = hits;
+    if (this.el.practiceShots) this.el.practiceShots.textContent = shots;
+    if (this.el.practiceAcc) {
+      this.el.practiceAcc.textContent = shots > 0
+        ? `${Math.round((hits / shots) * 100)}%${lastPart ? ' (last: ' + lastPart + ')' : ''}`
+        : '--';
+    }
+  }
+
+  resetPracticeStats() {
+    if (this.el.practiceHits) this.el.practiceHits.textContent = '0';
+    if (this.el.practiceShots) this.el.practiceShots.textContent = '0';
+    if (this.el.practiceAcc) this.el.practiceAcc.textContent = '--';
   }
 
   update(dt) {

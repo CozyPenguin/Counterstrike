@@ -379,6 +379,10 @@ export class Bot {
         if (this.burstLeft <= 0) {
           this.burstLeft = 2 + ((Math.random() * 3) | 0);
           this.shootCooldown = 0.55 + Math.random() * 0.75;
+          // Start of a fresh burst: reset the per-shot spray counter so
+          // the bot's miss direction starts at the first pattern entry
+          // (the famous first-shot-RNG bullet of a VALORANT-style spray).
+          this.shotSinceSpray = 0;
         } else {
           this.burstLeft--;
           this.shootCooldown = 0.11 + Math.random() * 0.07;
