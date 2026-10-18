@@ -623,3 +623,10 @@ button:active { transform: translateY(1px); }
 }
 
 #match-end h1 { font-size: 44px; }
+
+.lan-menu { margin: 20px auto; max-width: 450px; padding: 16px; border: 1px solid #7776; }
+.lan-menu label { display: block; color: #efc477; margin-bottom: 12px; }
+.lan-menu input { padding: 10px; background: #171d21; color: white; border: 1px solid #777; width: 140px; }
+#lan-btn { padding: 10px 16px; font-size: 14px; }
+.lan-menu p { font-size: 12px; color: #c5cbd0; margin: 10px 0 0; }
+#lan-status { color: #efc477; }

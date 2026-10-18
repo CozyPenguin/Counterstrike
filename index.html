@@ -104,6 +104,13 @@
       <h1>COUNTERSTRIKE</h1>
       <p class="tagline">tactical browser operations</p>
       <button id="play-btn">CLICK TO PLAY</button>
+      <div class="lan-menu">
+        <label for="lan-name">LAN DEATHMATCH · up to 10 players</label>
+        <input id="lan-name" maxlength="20" placeholder="Player name" value="Player" autocomplete="nickname" />
+        <button id="lan-btn">JOIN LAN GAME</button>
+        <p>Everyone opens this host’s LAN URL. AK-47 · free-for-all · 3s respawn</p>
+        <p id="lan-status" role="status"></p>
+      </div>
       <div class="controls-grid">
         <div><b>WASD</b> move</div>
         <div><b>MOUSE</b> aim</div>

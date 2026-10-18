@@ -29,6 +29,36 @@ Tests (headless smoke test of world, movement, weapons, bot AI):
 npm test
 ```
 
+## LAN multiplayer
+
+1. On the host computer, run `npm install`, then `npm run dev`.
+   Alternatively, run `npm run build && npm run preview` to serve the built game.
+   Both commands include the multiplayer server on the **same port**, 5173.
+2. Allow inbound TCP port **5173** through the host’s firewall on your private network.
+3. Every player, including the host, opens `http://<host-LAN-IP>:5173`
+   (for example, `http://192.168.1.42:5173`), enters a name, and clicks **JOIN LAN GAME**.
+   Find the host IP with `ipconfig` on Windows, or your network settings on macOS/Linux.
+   Other computers must use the host’s IP, **not** `localhost`.
+
+LAN mode is a separate, continuous **free-for-all deathmatch** for up to **10 players**:
+- Everyone receives an AK-47, with unlimited reserve ammunition; press **R** to reload.
+- Server-resolved hits, wall occlusion, headshots, kills/deaths, and **TAB** scores.
+- Automatic respawn after **3 seconds**, with **2 seconds** of spawn protection.
+- No bots, buy menu, team rounds, or match-win limit in this mode.
+- Releasing the mouse does **not** pause the shared game or make you invulnerable.
+  Use **ESC → LEAVE LAN GAME** to return to the menu.
+- The host process must stay running. If disconnected, join again from the menu;
+  scores reset on reconnect or server restart.
+
+All clients on one host share one match. WebSocket traffic uses the page’s host and
+port (`/lan`), so no separate server address or port is needed. A static-file-only
+host will **not** support multiplayer: run the Vite dev/preview command above.
+Use a trusted private LAN: there is no account system, matchmaking, or full
+anti-cheat (movement is client-driven with server bounds/speed checks).
+Guest Wi-Fi isolation may prevent devices from reaching one another.
+
+Run `npm run test:lan` for the two-client WebSocket integration test.
+
 ## The game
 
 - **Round-based elimination** — you are Counter-Terrorist; wipe out the 5 terrorists
