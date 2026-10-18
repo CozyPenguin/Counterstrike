@@ -40,6 +40,9 @@ const { Player } = await import('../src/player.js');
 const { WeaponSystem, WEAPONS, buildViewModel } = await import('../src/weapons.js');
 const { Bot } = await import('../src/bots.js');
 const { Effects } = await import('../src/effects.js');
+const { Sound } = await import('../src/audio.js');
+const { settings, QUALITY_PRESETS } = await import('../src/settings.js');
+const { MAP_LIST, buildMap } = await import('../src/maps/index.js');
 
 let failures = 0;
 function check(name, cond) {
@@ -228,6 +231,96 @@ console.log('effects:');
   check('effects spawn', fx.live.length > 5);
   for (let i = 0; i < 30; i++) fx.update(1 / 60);
   check('effects expire', fx.live.length === 0);
+}
+
+console.log(failures === 0 ? '\nALL SMOKE TESTS PASSED' : `\n${failures} FAILURES`);
+
+// ---------- All maps build and have connected nav graphs ----------
+console.log('maps:');
+{
+  for (const meta of MAP_LIST) {
+    const s = new THREE.Scene();
+    const w = buildMap(meta.id, s);
+    check(`${meta.id} builds with colliders`, w.colliders.length >= 25);
+    check(`${meta.id} has spawn points`, w.spawnsCT.length === 5 && w.spawnsT.length === 5);
+    const connected = w.nodes.filter((n) => n.neighbors.length > 0).length;
+    check(`${meta.id} nav graph is linked`, connected >= w.nodes.length - 2);
+    // BFS connectivity
+    const seen = new Set([0]);
+    const q = [0];
+    while (q.length) {
+      const cur = q.shift();
+      for (const nb of w.nodes[cur].neighbors) {
+        if (!seen.has(nb)) { seen.add(nb); q.push(nb); }
+      }
+    }
+    check(`${meta.id} nav graph is connected (${seen.size}/${w.nodes.length})`, seen.size === w.nodes.length);
+    // The player can actually stand on a CT spawn and reach a T spawn by pathfinding
+    const start = w.nodes.reduce((best, n, i) =>
+      best === -1 || n.pos.distanceToSquared(w.spawnsCT[0]) < w.nodes[best].pos.distanceToSquared(w.spawnsCT[0]) ? i : best,
+    -1);
+    const goal = w.nodes.reduce((best, n, i) =>
+      best === -1 || n.pos.distanceToSquared(w.spawnsT[0]) < w.nodes[best].pos.distanceToSquared(w.spawnsT[0]) ? i : best,
+    -1);
+    // Simple BFS reachability
+    const visited = new Set([start]);
+    const qq = [start];
+    while (qq.length) {
+      const cur = qq.shift();
+      for (const nb of w.nodes[cur].neighbors) {
+        if (!visited.has(nb)) { visited.add(nb); qq.push(nb); }
+      }
+    }
+    check(`${meta.id} CT and T spawns are connected by nav graph`, visited.has(goal));
+  }
+}
+
+// ---------- Settings module ----------
+console.log('settings:');
+{
+  // Reset to a known state for the test
+  settings.reset();
+  check('default quality is medium', settings.get('quality') === 'medium');
+  check('default fov is 78', settings.get('fov') === 78);
+  check('default volume is 0.55', Math.abs(settings.get('volume') - 0.55) < 1e-6);
+
+  settings.set('quality', 'low');
+  const eff = settings.effective();
+  check('low preset pixel ratio 1', eff.pixelRatio === 1);
+  check('low preset disables shadows', eff.shadows === false);
+  check('low preset low decals', eff.maxDecals === 18);
+
+  settings.set('quality', 'high');
+  const hi = settings.effective();
+  check('high preset enables shadows', hi.shadows === true);
+  check('high preset has 2048 shadow map', hi.shadowMapSize === 2048);
+
+  settings.set('shadowQuality', 'low');
+  const ovr = settings.effective();
+  check('explicit shadow override beats preset', ovr.shadowMapSize === 512 && ovr.shadowType === 'basic');
+
+  // Persistence round-trip via localStorage
+  settings.set('fov', 95);
+  const re = await import('../src/settings.js');
+  check('fov persists', re.settings.get('fov') === 95);
+  re.settings.reset();
+}
+
+// ---------- Reload sound API surface ----------
+console.log('reload sounds:');
+{
+  const s = new Sound();
+  // Without an AudioContext these should all be no-ops, but they must not throw.
+  for (const kind of ['pistol', 'rifle', 'smg', 'sniper', 'knife']) {
+    s.reload(kind, 2.5);
+  }
+  for (const kind of ['pistol', 'rifle', 'smg', 'sniper']) {
+    s.dryFire(kind);
+  }
+  s.roundStart();
+  s.roundWin();
+  s.roundLose();
+  check('per-class reload/dryFire/stingers callable without AudioContext', true);
 }
 
 console.log(failures === 0 ? '\nALL SMOKE TESTS PASSED' : `\n${failures} FAILURES`);

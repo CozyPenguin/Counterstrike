@@ -2,6 +2,10 @@ import * as THREE from 'three';
 
 /**
  * Pooled one-shot effects: tracers, impact puffs, blood, decals.
+ *
+ * `applyQuality(preset)` lets the host (main.js) cap the number of decals,
+ * blood splatter count, spark count, and the muzzle flash sprite based on
+ * the active graphics preset.
  */
 export class Effects {
   constructor(scene, world) {
@@ -35,6 +39,22 @@ export class Effects {
     });
     this.decals = [];
     this.maxDecals = 60;
+    this.bloodCount = 7;
+    this.sparkCount = 4;
+    this.flashSprite = true;
+  }
+
+  applyQuality(preset) {
+    this.maxDecals = preset.maxDecals;
+    this.bloodCount = preset.bloodCount;
+    this.sparkCount = preset.sparkCount;
+    this.flashSprite = preset.flashSprite;
+    // cull decals above the new cap
+    while (this.decals.length > this.maxDecals) {
+      const old = this.decals.shift();
+      this.scene.remove(old);
+      old.material.dispose();
+    }
   }
 
   _makeDecalTexture() {
@@ -81,8 +101,8 @@ export class Effects {
       vel: normal.clone().multiplyScalar(1.1).add(new THREE.Vector3((Math.random() - 0.5) * 0.6, 0.6, (Math.random() - 0.5) * 0.6)),
     });
 
-    // sparks: a few tiny fast particles
-    for (let i = 0; i < 4; i++) {
+    // sparks: configurable count (low quality = 0)
+    for (let i = 0; i < this.sparkCount; i++) {
       const s = new THREE.Mesh(this.puffGeo, new THREE.MeshBasicMaterial({ color: 0xffc98a, transparent: true, opacity: 0.95, depthWrite: false }));
       s.scale.setScalar(0.22);
       s.position.copy(point);
@@ -114,7 +134,7 @@ export class Effects {
   }
 
   spawnBlood(point) {
-    for (let i = 0; i < 7; i++) {
+    for (let i = 0; i < this.bloodCount; i++) {
       const b = new THREE.Mesh(this.puffGeo, this.bloodMat.clone());
       b.scale.setScalar(0.35 + Math.random() * 0.55);
       b.position.copy(point);

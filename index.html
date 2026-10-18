@@ -103,8 +103,18 @@
     <div class="menu-inner">
       <h1>COUNTERSTRIKE</h1>
       <p class="tagline">tactical browser operations</p>
+
+      <div class="menu-row">
+        <div class="map-picker">
+          <h3>SELECT MAP</h3>
+          <div id="map-list" class="map-list"></div>
+          <p id="map-desc" class="map-desc"></p>
+        </div>
+      </div>
+
       <button id="play-btn">CLICK TO PLAY</button>
       <button id="multiplayer-btn">MULTIPLAYER</button>
+      <button id="settings-btn" class="secondary-btn">SETTINGS</button>
       <section id="lan-browser" class="lan-menu hidden" aria-label="Multiplayer rooms">
         <h2>LAN ROOMS</h2>
         <label for="lan-name">Your name</label>
@@ -139,6 +149,60 @@
         <div><b>TAB</b> scoreboard</div>
       </div>
       <p class="objective">Eliminate the enemy team. Win 8 rounds to take the match.<br/>Spend money on weapons between rounds.</p>
+    </div>
+  </div>
+
+  <!-- ======== SETTINGS PANEL ======== -->
+  <div id="settings-panel" class="hidden">
+    <div class="settings-inner">
+      <h2>SETTINGS</h2>
+
+      <div class="settings-section">
+        <h3>GRAPHICS</h3>
+        <div class="setting-row">
+          <label>Quality preset</label>
+          <div class="seg" id="quality-seg">
+            <button data-val="low">LOW</button>
+            <button data-val="medium">MED</button>
+            <button data-val="high">HIGH</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <label>Shadow quality</label>
+          <div class="seg" id="shadow-seg">
+            <button data-val="auto">AUTO</button>
+            <button data-val="low">LOW</button>
+            <button data-val="med">MED</button>
+            <button data-val="high">HIGH</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <label>Field of view <span id="fov-val">78</span></label>
+          <input id="fov-slider" type="range" min="60" max="110" step="1" />
+        </div>
+        <p class="settings-hint">Lower quality disables shadows, lowers shadow-map size, simplifies the sky, and shortens the fog distance. FOV change is live; quality preset applies on click.</p>
+      </div>
+
+      <div class="settings-section">
+        <h3>AUDIO</h3>
+        <div class="setting-row">
+          <label>Master volume <span id="vol-val">55%</span></label>
+          <input id="vol-slider" type="range" min="0" max="100" step="1" />
+        </div>
+      </div>
+
+      <div class="settings-section">
+        <h3>CONTROLS</h3>
+        <div class="setting-row">
+          <label>Mouse sensitivity <span id="sens-val">2.1</span></label>
+          <input id="sens-slider" type="range" min="0.5" max="5" step="0.1" />
+        </div>
+      </div>
+
+      <div class="settings-footer">
+        <button id="settings-back">BACK</button>
+        <button id="settings-reset" class="secondary-btn">RESET DEFAULTS</button>
+      </div>
     </div>
   </div>
 

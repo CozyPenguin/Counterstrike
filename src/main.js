@@ -8,62 +8,162 @@ import { HUD } from './hud.js';
 import { Sound } from './audio.js';
 import { LANClient } from './lan.js';
 import { skyTexture } from './textures.js';
+import { MAP_LIST, buildMap } from './maps/index.js';
+import { settings, QUALITY_PRESETS } from './settings.js';
 
 // ================= Renderer / Scene =================
 
 const canvas = document.getElementById('game');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x9db9cf);
-scene.fog = new THREE.Fog(0xbcc9c8, 55, 165);
 
 const camera = new THREE.PerspectiveCamera(78, window.innerWidth / window.innerHeight, 0.05, 220);
 scene.add(camera);
 
-// sky dome (inside-out sphere with gradient)
-{
-  const skyGeo = new THREE.SphereGeometry(150, 16, 12);
+// sky dome (inside-out sphere with gradient). Sphere detail depends on
+// quality preset so low-end doesn't pay for 16 segments.
+let skyMesh = null;
+function buildSky(detail = 12) {
+  if (skyMesh) {
+    scene.remove(skyMesh);
+    skyMesh.geometry.dispose();
+    skyMesh.material.map?.dispose();
+    skyMesh.material.dispose();
+    skyMesh = null;
+  }
+  const skyGeo = new THREE.SphereGeometry(150, Math.max(6, detail), Math.max(4, detail - 4));
   const skyMat = new THREE.MeshBasicMaterial({
     map: skyTexture(),
     side: THREE.BackSide,
     fog: false,
   });
-  const sky = new THREE.Mesh(skyGeo, skyMat);
-  scene.add(sky);
+  skyMesh = new THREE.Mesh(skyGeo, skyMat);
+  scene.add(skyMesh);
 }
 
-// lights
-const hemi = new THREE.HemisphereLight(0xa8c4dd, 0xb89f72, 0.95);
-scene.add(hemi);
+// lights — directional (sun) and hemisphere. They follow the active map's
+// ambient palette; the default values match Dustline.
+let hemi = null;
+let sun = null;
+function buildLights(ambient) {
+  if (hemi) scene.remove(hemi);
+  if (sun) scene.remove(sun);
+  hemi = new THREE.HemisphereLight(ambient.hemi, ambient.ground, ambient.hemiIntensity ?? 0.9);
+  scene.add(hemi);
+  sun = new THREE.DirectionalLight(ambient.sun, ambient.sunIntensity ?? 1.5);
+  sun.position.set(38, 58, 22);
+  const eff = settings.effective();
+  sun.castShadow = eff.shadows;
+  sun.shadow.mapSize.set(eff.shadowMapSize, eff.shadowMapSize);
+  sun.shadow.camera.left = -50;
+  sun.shadow.camera.right = 50;
+  sun.shadow.camera.top = 50;
+  sun.shadow.camera.bottom = -50;
+  sun.shadow.camera.near = 5;
+  sun.shadow.camera.far = 140;
+  sun.shadow.bias = -0.0006;
+  scene.add(sun);
+  scene.background = new THREE.Color(ambient.sky);
+  scene.fog = new THREE.Fog(ambient.fog, ambient.fogNear, ambient.fogFar);
+  buildSky(eff.skyDetail);
+}
 
-const sun = new THREE.DirectionalLight(0xfff2dc, 1.75);
-sun.position.set(38, 58, 22);
-sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
-sun.shadow.camera.left = -50;
-sun.shadow.camera.right = 50;
-sun.shadow.camera.top = 50;
-sun.shadow.camera.bottom = -50;
-sun.shadow.camera.near = 5;
-sun.shadow.camera.far = 140;
-sun.shadow.bias = -0.0006;
-scene.add(sun);
+// Apply the current settings preset to the renderer / fog / sky / shadows.
+function applyGraphicsSettings() {
+  const eff = settings.effective();
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, eff.pixelRatio));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.shadowMap.enabled = eff.shadows;
+  renderer.shadowMap.type = eff.shadowType === 'pcfsoft' ? THREE.PCFSoftShadowMap : THREE.BasicShadowMap;
+  // FOV — only override if the user isn't currently scoped (AWP scope forces
+  // its own FOV).
+  if (!weapons || !weapons.zoomed) {
+    camera.fov = settings.get('fov');
+    camera.updateProjectionMatrix();
+  }
+  // Push the preset into the effects system (decals, blood, sparks, flash).
+  effects.applyQuality(eff);
+  weapons.setFlashEnabled(eff.flashSprite);
+  // Rebuild sky if quality changed its detail
+  buildSky(eff.skyDetail);
+  // Re-apply fog distance from preset (will be overridden per-map at build
+  // time, but this keeps the live fog updated when quality changes).
+  if (scene.fog) {
+    scene.fog.near = eff.fogNear;
+    scene.fog.far = eff.fogFar;
+  }
+  // Re-apply shadow map size in case shadowQuality changed
+  if (sun) {
+    sun.castShadow = eff.shadows;
+    sun.shadow.mapSize.set(eff.shadowMapSize, eff.shadowMapSize);
+    sun.shadow.map?.dispose();
+    sun.shadow.map = null;
+  }
+}
 
-const world = buildWorld(scene);
+// The world is rebuilt when the player picks a new map in the main menu.
+let world = null;
+let activeMapId = settings.get('lastMap') || 'dust';
+world = buildMap(activeMapId, scene);
+buildLights(world.ambient);
+
 const sound = new Sound();
 const player = new Player(camera, world);
 const weapons = new WeaponSystem(camera, sound, world);
 const effects = new Effects(scene, world);
 const hud = new HUD(sound);
+hud.setMapList(MAP_LIST, activeMapId);
+
+// Apply initial graphics + audio settings
+applyGraphicsSettings();
+sound.setVolume(settings.get('volume'));
 
 player.respawn(world.spawnsCT[2], 0);
+
+// ================= Map rebuild =================
+
+/** Remove every mesh that belongs to the currently-loaded map. */
+function clearMapFromScene() {
+  const remove = [];
+  scene.traverse((obj) => {
+    if (!obj.isMesh) return;
+    // Keep the sky dome (we rebuild it ourselves) and the weapon view model
+    // (which is attached to the camera, not the scene root).
+    if (obj === skyMesh) return;
+    remove.push(obj);
+  });
+  for (const m of remove) {
+    scene.remove(m);
+    if (m.geometry) m.geometry.dispose();
+    if (m.material) {
+      const mats = Array.isArray(m.material) ? m.material : [m.material];
+      for (const mat of mats) {
+        if (mat.map) mat.map.dispose();
+        mat.dispose();
+      }
+    }
+  }
+}
+
+function rebuildMap(mapId) {
+  clearBots();
+  effects.clear();
+  clearMapFromScene();
+  activeMapId = mapId;
+  world = buildMap(mapId, scene);
+  buildLights(world.ambient);
+  // refresh world reference in the systems that hold it
+  player.world = world;
+  weapons.world = world;
+  effects.world = world;
+  applyGraphicsSettings();
+  player.respawn(world.spawnsCT[2], 0);
+  settings.set('lastMap', mapId);
+}
 
 // ================= Game state =================
 
@@ -214,7 +314,7 @@ window.addEventListener('contextmenu', (e) => e.preventDefault());
 
 window.addEventListener('mousemove', (e) => {
   if (document.pointerLockElement === canvas && !paused && !buyMenuOpen) {
-    const sens = 0.0021 * (weapons.zoomed ? 0.45 : 1);
+    const sens = (settings.get('mouseSensitivity') / 2.1) * 0.0021 * (weapons.zoomed ? 0.45 : 1);
     player.applyMouse(e.movementX, e.movementY, sens);
   }
 });
@@ -255,6 +355,53 @@ document.getElementById('restart-btn').addEventListener('click', () => {
   hud.showHUD(true);
   lockPointer();
   startMatch();
+});
+
+// ---- Map picker & settings ----
+hud.onPickMap = (id) => {
+  if (id === activeMapId) return;
+  rebuildMap(id);
+  hud.announce(`MAP: ${hud._maps.find((m) => m.id === id)?.name.toUpperCase() || id.toUpperCase()}`, 'neutral', 1.8);
+};
+
+document.getElementById('settings-btn').addEventListener('click', () => {
+  // Re-sync UI from current settings every time we open the panel
+  hud.bindSettings({
+    initial: readSettings(),
+    onChange, onClose, onReset,
+  });
+  hud.showSettings(true);
+});
+
+function readSettings() {
+  return {
+    quality: settings.get('quality'),
+    shadowQuality: settings.get('shadowQuality'),
+    fov: settings.get('fov'),
+    volume: settings.get('volume'),
+    mouseSensitivity: settings.get('mouseSensitivity'),
+  };
+}
+
+function onChange(patch) {
+  settings.setMany(patch);
+  if ('volume' in patch) sound.setVolume(settings.get('volume'));
+  applyGraphicsSettings();
+}
+function onClose() {
+  hud.showSettings(false);
+}
+function onReset() {
+  settings.reset();
+  applyGraphicsSettings();
+  sound.setVolume(settings.get('volume'));
+  // Refresh the UI to show the new defaults
+  hud.bindSettings({ initial: readSettings(), onChange, onClose, onReset });
+}
+
+hud.bindSettings({
+  initial: readSettings(),
+  onChange, onClose, onReset,
 });
 
 hud.onBuy = (id) => tryBuy(id);
@@ -836,7 +983,7 @@ function update() {
   }
   input.zoomPressed = false;
 
-  const targetFov = weapons.zoomed ? weapons.current.def.zoomFov : 78;
+  const targetFov = weapons.zoomed ? weapons.current.def.zoomFov : settings.get('fov');
   camera.fov += (targetFov - camera.fov) * Math.min(1, rawDt * 14);
   camera.updateProjectionMatrix();
 
