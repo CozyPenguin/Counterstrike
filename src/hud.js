@@ -291,39 +291,55 @@ export class HUD {
         }
       };
 
-      this._paintSettings = (init) => {
-        paintSeg('quality-seg', init.quality, ['low', 'medium', 'high']);
-        paintSeg('shadow-seg', init.shadowQuality, ['auto', 'low', 'med', 'high']);
-        fov.value = init.fov;
-        fovVal.textContent = init.fov;
-        vol.value = Math.round(init.volume * 100);
-        volVal.textContent = `${Math.round(init.volume * 100)}%`;
-        sens.value = init.mouseSensitivity.toFixed(1);
-        sensVal.textContent = init.mouseSensitivity.toFixed(1);
+      // Current "live" state of the panel. We update this on every
+      // user interaction and re-paint from it, so the visual selection
+      // indicator always tracks the value the user just clicked.
+      const live = { quality: null, shadowQuality: null, fov: 78, volume: 0.55, mouseSensitivity: 2.1 };
+
+      const paintAll = () => {
+        paintSeg('quality-seg', live.quality, ['low', 'medium', 'high']);
+        paintSeg('shadow-seg', live.shadowQuality, ['auto', 'low', 'med', 'high']);
+        fov.value = live.fov;
+        fovVal.textContent = live.fov;
+        vol.value = Math.round(live.volume * 100);
+        volVal.textContent = `${Math.round(live.volume * 100)}%`;
+        sens.value = live.mouseSensitivity.toFixed(1);
+        sensVal.textContent = live.mouseSensitivity.toFixed(1);
       };
+
+      // expose so the host can re-sync the panel after, e.g., Reset
+      this._paintSettings = (init) => Object.assign(live, init) || paintAll();
+      this._repaintSettings = paintAll;
 
       for (const b of document.querySelectorAll('#quality-seg button')) {
         b.addEventListener('click', () => {
+          live.quality = b.dataset.val;
+          paintSeg('quality-seg', live.quality, ['low', 'medium', 'high']);
           this._settingsCb.onChange({ quality: b.dataset.val });
         });
       }
       for (const b of document.querySelectorAll('#shadow-seg button')) {
         b.addEventListener('click', () => {
+          live.shadowQuality = b.dataset.val;
+          paintSeg('shadow-seg', live.shadowQuality, ['auto', 'low', 'med', 'high']);
           this._settingsCb.onChange({ shadowQuality: b.dataset.val });
         });
       }
       fov.addEventListener('input', () => {
         const v = +fov.value;
+        live.fov = v;
         fovVal.textContent = v;
         this._settingsCb.onChange({ fov: v });
       });
       vol.addEventListener('input', () => {
         const v = +vol.value / 100;
+        live.volume = v;
         volVal.textContent = `${vol.value}%`;
         this._settingsCb.onChange({ volume: v });
       });
       sens.addEventListener('input', () => {
         const v = +sens.value;
+        live.mouseSensitivity = v;
         sensVal.textContent = v.toFixed(1);
         this._settingsCb.onChange({ mouseSensitivity: v });
       });
