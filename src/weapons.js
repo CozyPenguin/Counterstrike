@@ -193,7 +193,8 @@ export class WeaponSystem {
     this.viewModel.position.set(0.26, -0.27, -0.5);
     this.camera.add(this.viewModel);
 
-    // muzzle flash sprite
+    // muzzle flash sprite (hidden entirely on low quality)
+    this.flashEnabled = true;
     const flashMat = new THREE.SpriteMaterial({
       color: 0xffd9a0,
       transparent: true,
@@ -204,8 +205,19 @@ export class WeaponSystem {
     this.flash = new THREE.Sprite(flashMat);
     this.flash.scale.set(0.32, 0.32, 1);
     this.flash.position.set(0, 0.03, -0.85);
-    this.viewModel.add(this.flash);
+    if (this.flashEnabled) this.viewModel.add(this.flash);
     this.flashTimer = 0;
+  }
+
+  /** Toggle the muzzle flash on/off (called by main.js when quality changes). */
+  setFlashEnabled(on) {
+    this.flashEnabled = on;
+    if (!on && this.flash.parent) {
+      this.flash.parent.remove(this.flash);
+      this.flash.material.opacity = 0;
+    } else if (on && this.flash.parent !== this.viewModel) {
+      this.viewModel.add(this.flash);
+    }
   }
 
   giveWeapon(id) {
@@ -273,7 +285,7 @@ export class WeaponSystem {
     this.flash.scale.set(0.32, 0.32, 1);
     const mz = kind === 'sniper' ? -1.15 : kind === 'pistol' ? -0.34 : kind === 'smg' ? -0.62 : -0.82;
     this.flash.position.set(0, 0.03, mz);
-    this.viewModel.add(this.flash);
+    if (this.flashEnabled) this.viewModel.add(this.flash);
   }
 
   /** Speed multiplier from the equipped weapon. */
@@ -292,7 +304,9 @@ export class WeaponSystem {
     this.reloading = true;
     this.reloadTimer = d.reload;
     this.zoomed = false;
-    this.sound.reload();
+    // Per-class reload: pistol/smg/rifle/sniper each get a distinct sound
+    // (mag release, drop, insert, bolt/slide rack). Knife is excluded.
+    this.sound.reload(d.kind, d.reload);
     return true;
   }
 
@@ -310,7 +324,8 @@ export class WeaponSystem {
     if (this.reloading || this.cooldown > 0) return null;
 
     if (d.mag !== Infinity && this.current.mag <= 0) {
-      this.sound.dryFire();
+      // Per-class dry-fire click (pistol slide lock, rifle/smg/sniper bolt).
+      this.sound.dryFire(d.kind);
       this.cooldown = 0.35;
       return null;
     }
@@ -421,12 +436,41 @@ export class WeaponSystem {
 
     if (this.reloading) {
       const d = this.current.def;
-      const p = 1 - Math.max(0, this.reloadTimer / d.reload); // 0 -> 1
-      const swing = Math.sin(p * Math.PI);
-      py -= swing * 0.24;
-      pz += swing * 0.1;
-      rx += swing * 0.75;
-      rz += swing * 0.55;
+      // 0 -> 1 over the reload duration. We split it into three phases that
+      // mirror the audio (mag drop ~0.0-0.2, mag insert ~0.55-0.7,
+      // bolt/slide rack ~0.85-0.95) and use a piecewise blend.
+      const p = 1 - Math.max(0, this.reloadTimer / d.reload);
+
+      // Phase 1 (0.0 - 0.2): weapon tilts down, mag drops away
+      const phase1 = p < 0.2 ? (1 - p / 0.2) : 0;
+      // Phase 2 (0.55 - 0.75): mag slides in (slight forward push)
+      const phase2 = p > 0.55 && p < 0.75 ? Math.sin(((p - 0.55) / 0.2) * Math.PI) : 0;
+      // Phase 3 (0.85 - 0.96): bolt / slide rack (sharp back-then-forward)
+      const phase3 = p > 0.85 && p < 0.96
+        ? Math.sin(((p - 0.85) / 0.11) * Math.PI)
+        : 0;
+
+      // Per-kind tuning: snipers move further, pistols lighter
+      const isPistol = d.kind === 'pistol';
+      const isSniper = d.kind === 'sniper';
+      const dropDepth = isPistol ? 0.18 : isSniper ? 0.34 : 0.26;
+      const tiltDrop = isPistol ? 0.55 : isSniper ? 1.1 : 0.85;
+      const rollDrop = isPistol ? 0.4 : isSniper ? 0.6 : 0.55;
+      const insertDepth = isPistol ? 0.06 : isSniper ? 0.14 : 0.1;
+      const rackBack = isPistol ? 0.14 : isSniper ? 0.22 : 0.18;
+
+      py -= phase1 * dropDepth;
+      pz += phase1 * 0.06;
+      rx += phase1 * tiltDrop;
+      rz += phase1 * rollDrop;
+
+      py -= phase2 * insertDepth;
+      pz -= phase2 * 0.04;
+      rx -= phase2 * 0.18;
+
+      // Rack: pull back then forward (sin starts positive = back)
+      pz += phase3 * rackBack;
+      rx -= phase3 * 0.4;
     }
 
     if (this.swapAnim) {
@@ -446,7 +490,9 @@ export class WeaponSystem {
     this.viewModel.rotation.set(rx, ry + (kind === 'knife' ? 0.5 : 0), rz + (kind === 'knife' ? -0.35 : 0));
 
     // muzzle flash
-    if (this.flashTimer > 0) {
+    if (!this.flashEnabled) {
+      // ensure opacity stays 0 if flash was disabled mid-shot
+    } else if (this.flashTimer > 0) {
       this.flashTimer -= dt;
       this.flash.material.opacity = this.flashTimer > 0 ? 0.85 : 0;
       this.flash.material.rotation = Math.random() * Math.PI;

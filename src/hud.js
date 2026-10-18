@@ -49,6 +49,11 @@ export class HUD {
     this.dmgTimer = 0;
     this.onBuy = null;
     this.onCloseBuy = null;
+    this.onPickMap = null;
+    this.onOpenSettings = null;
+    this.onCloseSettings = null;
+    this.onSettingChange = null;
+    this.onResetSettings = null;
     this._buildBuyMenu();
   }
 
@@ -221,6 +226,118 @@ export class HUD {
       this.el.matchResult.textContent = text;
       if (statsHtml) this.el.matchStats.innerHTML = statsHtml;
     }
+  }
+
+  // ============== Map picker ==============
+
+  setMapList(maps, selectedId) {
+    this._maps = maps;
+    this._selectedMap = selectedId;
+    const list = document.getElementById('map-list');
+    if (!list) return;
+    list.innerHTML = '';
+    for (const m of maps) {
+      const card = document.createElement('div');
+      card.className = 'map-card' + (m.id === selectedId ? ' selected' : '');
+      card.dataset.id = m.id;
+      card.innerHTML = `
+        <div class="name">${m.name.toUpperCase()}</div>
+        <div class="id">${m.id}</div>
+      `;
+      card.addEventListener('click', () => this._selectMap(m.id));
+      list.appendChild(card);
+    }
+    const desc = document.getElementById('map-desc');
+    const sel = maps.find((m) => m.id === selectedId) || maps[0];
+    if (desc && sel) desc.textContent = sel.description;
+  }
+
+  _selectMap(id) {
+    this._selectedMap = id;
+    const cards = document.querySelectorAll('.map-card');
+    for (const c of cards) c.classList.toggle('selected', c.dataset.id === id);
+    const sel = this._maps.find((m) => m.id === id);
+    const desc = document.getElementById('map-desc');
+    if (desc && sel) desc.textContent = sel.description;
+    if (this.onPickMap) this.onPickMap(id);
+  }
+
+  // ============== Settings ==============
+
+  /**
+   * Wire settings panel inputs. Idempotent — re-binding the same panel just
+   * re-syncs display values, which is what we want after a Reset.
+   */
+  bindSettings({ initial, onChange, onClose, onReset }) {
+    const panel = document.getElementById('settings-panel');
+    if (!panel) return;
+    // Stash callbacks so reset can call them later without re-binding.
+    if (!this._settingsBound) {
+      this._settingsBound = true;
+      const back = document.getElementById('settings-back');
+      const reset = document.getElementById('settings-reset');
+      const fov = document.getElementById('fov-slider');
+      const fovVal = document.getElementById('fov-val');
+      const vol = document.getElementById('vol-slider');
+      const volVal = document.getElementById('vol-val');
+      const sens = document.getElementById('sens-slider');
+      const sensVal = document.getElementById('sens-val');
+
+      const paintSeg = (rootId, value, allowed) => {
+        const root = document.getElementById(rootId);
+        if (!root) return;
+        for (const b of root.querySelectorAll('button')) {
+          b.classList.toggle('on', allowed.includes(b.dataset.val) && b.dataset.val === value);
+        }
+      };
+
+      this._paintSettings = (init) => {
+        paintSeg('quality-seg', init.quality, ['low', 'medium', 'high']);
+        paintSeg('shadow-seg', init.shadowQuality, ['auto', 'low', 'med', 'high']);
+        fov.value = init.fov;
+        fovVal.textContent = init.fov;
+        vol.value = Math.round(init.volume * 100);
+        volVal.textContent = `${Math.round(init.volume * 100)}%`;
+        sens.value = init.mouseSensitivity.toFixed(1);
+        sensVal.textContent = init.mouseSensitivity.toFixed(1);
+      };
+
+      for (const b of document.querySelectorAll('#quality-seg button')) {
+        b.addEventListener('click', () => {
+          this._settingsCb.onChange({ quality: b.dataset.val });
+        });
+      }
+      for (const b of document.querySelectorAll('#shadow-seg button')) {
+        b.addEventListener('click', () => {
+          this._settingsCb.onChange({ shadowQuality: b.dataset.val });
+        });
+      }
+      fov.addEventListener('input', () => {
+        const v = +fov.value;
+        fovVal.textContent = v;
+        this._settingsCb.onChange({ fov: v });
+      });
+      vol.addEventListener('input', () => {
+        const v = +vol.value / 100;
+        volVal.textContent = `${vol.value}%`;
+        this._settingsCb.onChange({ volume: v });
+      });
+      sens.addEventListener('input', () => {
+        const v = +sens.value;
+        sensVal.textContent = v.toFixed(1);
+        this._settingsCb.onChange({ mouseSensitivity: v });
+      });
+      back.addEventListener('click', () => this._settingsCb.onClose());
+      reset.addEventListener('click', () => this._settingsCb.onReset());
+    }
+
+    this._settingsCb = { onChange, onClose, onReset };
+    this._paintSettings(initial);
+  }
+
+  showSettings(show) {
+    const panel = document.getElementById('settings-panel');
+    if (panel) panel.classList.toggle('hidden', !show);
   }
 
   update(dt) {

@@ -440,6 +440,213 @@ button:active { transform: translateY(1px); }
   letter-spacing: 1px;
 }
 
+/* ============ MAP PICKER ============ */
+.menu-row {
+  margin: 18px auto 22px;
+  max-width: 640px;
+}
+
+.map-picker h3 {
+  font-size: 11px;
+  letter-spacing: 4px;
+  opacity: 0.55;
+  margin-bottom: 10px;
+}
+
+.map-list {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+@media (max-width: 640px) {
+  .map-list { grid-template-columns: repeat(2, 1fr); }
+}
+
+.map-card {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  padding: 12px 10px 10px;
+  cursor: pointer;
+  text-align: center;
+  transition: background 0.1s, border-color 0.1s, transform 0.1s;
+  color: #e8e4d8;
+}
+
+.map-card:hover {
+  background: rgba(200, 169, 92, 0.14);
+  border-color: rgba(200, 169, 92, 0.45);
+  transform: translateY(-1px);
+}
+
+.map-card.selected {
+  border-color: rgba(200, 169, 92, 0.95);
+  background: rgba(200, 169, 92, 0.22);
+  box-shadow: 0 0 0 1px rgba(200, 169, 92, 0.55) inset;
+}
+
+.map-card .name {
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 2px;
+}
+
+.map-card .id {
+  font-size: 10px;
+  opacity: 0.5;
+  margin-top: 2px;
+  letter-spacing: 1.5px;
+}
+
+.map-desc {
+  margin-top: 10px;
+  font-size: 12px;
+  letter-spacing: 1px;
+  opacity: 0.7;
+  min-height: 1.4em;
+}
+
+.secondary-btn {
+  background: linear-gradient(180deg, #4a525c, #2c333c);
+  color: #e8e4d8;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+  font-size: 13px;
+  letter-spacing: 4px;
+  padding: 10px 32px;
+  margin-top: 10px;
+  margin-left: 10px;
+}
+
+.secondary-btn:hover {
+  background: linear-gradient(180deg, #5a626c, #3a414c);
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.55);
+}
+
+/* ============ SETTINGS PANEL ============ */
+#settings-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(8, 10, 14, 0.92);
+  color: #e8e4d8;
+  padding: 20px;
+}
+
+.settings-inner {
+  background: rgba(18, 22, 28, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  padding: 30px 36px;
+  width: min(640px, 92vw);
+  max-height: 86vh;
+  overflow-y: auto;
+}
+
+.settings-inner h2 {
+  font-size: 24px;
+  letter-spacing: 6px;
+  margin-bottom: 18px;
+  text-align: center;
+}
+
+.settings-section {
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 16px 0 6px;
+  margin-top: 6px;
+}
+
+.settings-section h3 {
+  font-size: 11px;
+  letter-spacing: 3px;
+  opacity: 0.55;
+  margin-bottom: 12px;
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  font-size: 14px;
+  letter-spacing: 1px;
+  gap: 18px;
+}
+
+.setting-row label {
+  flex: 0 0 auto;
+  min-width: 180px;
+}
+
+.setting-row label span {
+  display: inline-block;
+  min-width: 38px;
+  margin-left: 8px;
+  color: #c8b273;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.seg {
+  display: inline-flex;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.seg button {
+  background: transparent;
+  color: #cfc9b8;
+  font-size: 11px;
+  letter-spacing: 2px;
+  padding: 6px 14px;
+  box-shadow: none;
+  border-radius: 0;
+  margin: 0;
+  font-weight: 700;
+}
+
+.seg button:hover {
+  background: rgba(200, 169, 92, 0.18);
+  transform: none;
+  box-shadow: none;
+}
+
+.seg button.on {
+  background: linear-gradient(180deg, #c8a95c, #8a7232);
+  color: #0e1116;
+}
+
+input[type="range"] {
+  flex: 1 1 220px;
+  accent-color: #c8a95c;
+  background: transparent;
+}
+
+.settings-hint {
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  opacity: 0.55;
+  margin-top: 4px;
+  line-height: 1.5;
+}
+
+.settings-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 22px;
+  gap: 12px;
+}
+
+.settings-footer button {
+  margin: 0;
+}
+
 /* ============ BUY MENU ============ */
 #buy-menu {
   position: fixed;
