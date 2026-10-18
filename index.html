@@ -104,13 +104,26 @@
       <h1>COUNTERSTRIKE</h1>
       <p class="tagline">tactical browser operations</p>
       <button id="play-btn">CLICK TO PLAY</button>
-      <div class="lan-menu">
-        <label for="lan-name">LAN DEATHMATCH · up to 10 players</label>
+      <button id="multiplayer-btn">MULTIPLAYER</button>
+      <section id="lan-browser" class="lan-menu hidden" aria-label="Multiplayer rooms">
+        <h2>LAN ROOMS</h2>
+        <label for="lan-name">Your name</label>
         <input id="lan-name" maxlength="20" placeholder="Player name" value="Player" autocomplete="nickname" />
-        <button id="lan-btn">JOIN LAN GAME</button>
-        <p>Everyone opens this host’s LAN URL. AK-47 · free-for-all · 3s respawn</p>
+        <div class="room-create">
+          <label for="room-name">Create a room</label>
+          <input id="room-name" maxlength="32" placeholder="Room name" value="My LAN Room" />
+          <button id="lan-btn">CREATE ROOM</button>
+        </div>
+        <div class="room-heading"><b>Available rooms on this host</b><button id="refresh-rooms">REFRESH</button></div>
+        <div id="room-list"></div>
         <p id="lan-status" role="status"></p>
-      </div>
+        <details open><summary>Playing on the same Wi-Fi?</summary>
+          <p>One computer runs <code>npm run dev</code>. Everyone must open that computer’s URL below, not their own localhost. Rooms appear here automatically.</p>
+          <div id="host-addresses"></div>
+          <button id="copy-game-link">COPY CURRENT GAME LINK</button>
+          <p>A browser cannot scan Wi-Fi for other servers. This lists rooms on the host you opened. Allow TCP 5173 in the host firewall; guest Wi-Fi may block connections.</p>
+        </details>
+      </section>
       <div class="controls-grid">
         <div><b>WASD</b> move</div>
         <div><b>MOUSE</b> aim</div>

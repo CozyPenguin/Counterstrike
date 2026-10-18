@@ -5,10 +5,11 @@ import { attachLAN } from '../server/lan.js';
 
 const server = createServer();
 const lan = attachLAN(server);
+server.on('request', lan.request);
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const clients = [];
 const delay = ms => new Promise(r => setTimeout(r, ms));
-async function connect(name) {
+async function connect(name, room = {}, expected = 'spawn') {
   const ws = new WebSocket(`ws://127.0.0.1:${server.address().port}/lan`);
   const messages = [];
   ws.on('message', raw => messages.push(JSON.parse(raw)));
@@ -23,12 +24,23 @@ async function connect(name) {
   } };
   clients.push(client);
   const welcome = await client.wait('welcome'); client.id = welcome.id;
-  client.send({ type: 'join', name });
-  client.spawn = await client.wait('spawn');
+  client.send({ type: 'join', name, ...room });
+  client.spawn = await client.wait(expected);
   return client;
 }
 try {
-  const a = await connect('<Alice>'); const b = await connect('Bob');
+  const list = async () => (await fetch(`http://127.0.0.1:${server.address().port}/api/rooms`)).json();
+  assert.equal((await list()).rooms.length, 0);
+  const a = await connect('<Alice>', { createRoom: 'Friends Room' });
+  const roomId = a.spawn.roomId;
+  const b = await connect('Bob', { roomId });
+  assert.equal((await list()).rooms[0].players, 2);
+  assert.equal((await list()).rooms[0].name, 'Friends Room');
+  const c = await connect('Other', { createRoom: 'Separate Room' });
+  await c.wait('state', m => m.players.length === 1);
+  const missing = await connect('Missing', { roomId: 'not-a-room' }, 'error');
+  assert.match(missing.spawn.message, /closed/);
+  missing.ws.close();
   const state = await a.wait('state', m => m.players.length === 2);
   assert.equal(state.players.find(p => p.id === a.id).name, 'Alice');
   assert.notEqual(a.id, b.id);
@@ -43,6 +55,8 @@ try {
   a.send({ type: 'shot', dir });
   await b.wait('shot', m => m.id === a.id);
   await a.wait('hit', m => m.killed);
+  await delay(100);
+  assert.ok(!c.messages.some(m => m.type === 'shot' || m.type === 'kill'), 'combat stays inside its room');
   const kill = await b.wait('kill'); assert.equal(kill.killer, 'Alice');
   const dead = await a.wait('state', m => m.players.some(p => p.id === b.id && p.hp === 0));
   assert.equal(dead.players.find(p => p.id === a.id).kills, 1);
@@ -54,7 +68,16 @@ try {
   const respawn = await b.wait('spawn'); assert.equal(respawn.hp, 100);
   b.ws.close();
   await a.wait('state', m => m.players.length === 1);
-  console.log('LAN integration passed: join, sanitization, state, validation, shots, kill, scores, reload, respawn, disconnect');
+  const extras = [];
+  for (let i = 0; i < 9; i++) extras.push(await connect(`Guest${i}`, { roomId }));
+  const full = await connect('Overflow', { roomId }, 'error');
+  assert.match(full.spawn.message, /full/);
+  full.ws.close();
+  assert.equal((await list()).rooms.find(r => r.id === roomId).players, 10);
+  for (const client of [a, c, ...extras]) client.ws.close();
+  await delay(150);
+  assert.equal((await list()).rooms.length, 0, 'empty rooms removed');
+  console.log('LAN integration passed: rooms, discovery API, isolation, capacity, cleanup, join, sanitization, state, validation, shots, kill, scores, reload, respawn, disconnect');
 } finally {
   for (const c of clients) c.ws.terminate();
   lan.close(); await new Promise(resolve => server.close(resolve));
