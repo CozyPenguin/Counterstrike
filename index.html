@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Counterstrike — Tactical FPS</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <!-- ======== HUD ======== -->
+  <div id="hud" class="hidden">
+    <div id="topbar">
+      <div class="score ct"><span class="tag">CT</span><span id="score-ct">0</span></div>
+      <div id="round-timer">1:55</div>
+      <div class="score t"><span id="score-t">0</span><span class="tag">T</span></div>
+      <div id="round-info">ROUND 1 &nbsp;·&nbsp; MR8</div>
+    </div>
+
+    <div id="crosshair">
+      <div class="ch-line ch-top"></div>
+      <div class="ch-line ch-bottom"></div>
+      <div class="ch-line ch-left"></div>
+      <div class="ch-line ch-right"></div>
+      <div class="ch-dot"></div>
+    </div>
+
+    <div id="hitmarker">
+      <div class="hm hm1"></div>
+      <div class="hm hm2"></div>
+      <div class="hm hm3"></div>
+      <div class="hm hm4"></div>
+    </div>
+
+    <div id="scope" class="hidden">
+      <div class="scope-lens">
+        <div class="scope-hline"></div>
+        <div class="scope-vline"></div>
+        <div class="scope-dot"></div>
+      </div>
+    </div>
+
+    <div id="killfeed"></div>
+
+    <div id="damage-flash"></div>
+    <div id="damage-arrows"></div>
+
+    <div id="bottom-hud">
+      <div id="health-block">
+        <div class="stat">
+          <span class="icon">+</span>
+          <span id="health">100</span>
+        </div>
+        <div class="stat">
+          <span class="icon">⛨</span>
+          <span id="armor">0</span>
+        </div>
+      </div>
+      <div id="announce"></div>
+      <div id="ammo-block">
+        <div id="weapon-name">USP-S</div>
+        <div class="stat">
+          <span id="ammo-mag">12</span>
+          <span class="ammo-sep">/</span>
+          <span id="ammo-reserve">24</span>
+        </div>
+      </div>
+    </div>
+
+    <div id="money">$800</div>
+    <div id="spectator-note" class="hidden">SPECTATING</div>
+  </div>
+
+  <!-- ======== BUY MENU ======== -->
+  <div id="buy-menu" class="hidden">
+    <div class="buy-panel">
+      <h2>BUY EQUIPMENT <span class="buy-hint">click an item or press its number</span></h2>
+      <div id="buy-timer">BUY TIME: 12</div>
+      <div class="buy-cols">
+        <div class="buy-col">
+          <h3>PISTOLS</h3>
+          <div id="buy-pistols" class="buy-list"></div>
+        </div>
+        <div class="buy-col">
+          <h3>PRIMARY</h3>
+          <div id="buy-primary" class="buy-list"></div>
+        </div>
+        <div class="buy-col">
+          <h3>GEAR</h3>
+          <div id="buy-gear" class="buy-list"></div>
+        </div>
+      </div>
+      <div class="buy-footer">
+        press <b>B</b> to close &nbsp;·&nbsp; number keys work too
+        <button id="deploy-btn">DEPLOY</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ======== MAIN MENU ======== -->
+  <div id="main-menu">
+    <div class="menu-inner">
+      <h1>COUNTERSTRIKE</h1>
+      <p class="tagline">tactical browser operations</p>
+      <button id="play-btn">CLICK TO PLAY</button>
+      <div class="controls-grid">
+        <div><b>WASD</b> move</div>
+        <div><b>MOUSE</b> aim</div>
+        <div><b>LMB</b> fire</div>
+        <div><b>RMB</b> zoom / scope</div>
+        <div><b>SPACE</b> jump</div>
+        <div><b>CTRL</b> crouch</div>
+        <div><b>SHIFT</b> walk (quiet)</div>
+        <div><b>R</b> reload</div>
+        <div><b>1 2 3</b> primary / pistol / knife</div>
+        <div><b>Q</b> last weapon</div>
+        <div><b>B</b> buy menu</div>
+        <div><b>TAB</b> scoreboard</div>
+      </div>
+      <p class="objective">Eliminate the enemy team. Win 8 rounds to take the match.<br/>Spend money on weapons between rounds.</p>
+    </div>
+  </div>
+
+  <!-- ======== PAUSE ======== -->
+  <div id="pause-menu" class="hidden">
+    <div class="menu-inner">
+      <h2>PAUSED</h2>
+      <button id="resume-btn">RESUME</button>
+      <p class="objective">Mouse is unlocked. Click resume to jump back in.</p>
+    </div>
+  </div>
+
+  <!-- ======== SCOREBOARD ======== -->
+  <div id="scoreboard" class="hidden">
+    <div class="scoreboard-inner">
+      <h2>MATCH SCOREBOARD</h2>
+      <table>
+        <thead>
+          <tr><th>PLAYER</th><th>TEAM</th><th>KILLS</th><th>DEATHS</th><th>SCORE</th></tr>
+        </thead>
+        <tbody id="scoreboard-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="match-end" class="hidden">
+    <div class="menu-inner">
+      <h1 id="match-result">COUNTER-TERRORISTS WIN</h1>
+      <div id="match-stats"></div>
+      <button id="restart-btn">PLAY AGAIN</button>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
