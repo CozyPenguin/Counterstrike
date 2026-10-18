@@ -233,6 +233,52 @@ console.log('effects:');
   check('effects expire', fx.live.length === 0);
 }
 
+// ---------- Recoil patterns ----------
+console.log('recoil:');
+{
+  const { getRecoilPattern, recoilForShot, verticalCompensationPerSecond, listPatternedWeapons } = await import('../src/recoil.js');
+  const weapons = listPatternedWeapons();
+  check('every weapon has a pattern', weapons.length === Object.keys(WEAPONS).length);
+  for (const id of weapons) {
+    const p = getRecoilPattern(id);
+    check(`${id} pattern has climb entries`, p.climb.length > 0);
+    check(`${id} pattern has recovery`, p.recovery >= 0);
+  }
+
+  // First-shot multiplier is applied
+  const ak = getRecoilPattern('ak47');
+  const shot0 = recoilForShot(ak, 0, true, () => 0.5);
+  const shot0b = recoilForShot(ak, 0, true, () => 0.5);
+  // The pattern's first entry p=0.0132, with firstShotMult=1.35 should give 0.01782
+  check('ak47 first-shot multiplies pitch', Math.abs(shot0.dPitch - 0.0132 * 1.35) < 1e-6);
+  // Not first bullet: no mult
+  const shot5 = recoilForShot(ak, 5, false, () => 0.5);
+  check('ak47 mid-spray has no first-shot mult', Math.abs(shot5.dPitch - 0.0120) < 1e-6);
+  // Yaw deterministic with seeded rng
+  const s0a = recoilForShot(ak, 0, true, () => 0.0);
+  const s0b2 = recoilForShot(ak, 0, true, () => 1.0);
+  check('first-bullet RNG affects yaw', s0a.dYaw !== s0b2.dYaw);
+  // Non-first bullets have no RNG
+  const s5a = recoilForShot(ak, 5, false, () => 0.0);
+  const s5b = recoilForShot(ak, 5, false, () => 1.0);
+  check('mid-bullet has no RNG', s5a.dYaw === s5b.dYaw);
+
+  // Out-of-range index falls back to the last entry
+  const shot30 = recoilForShot(ak, 30, false, () => 0.5);
+  const shot29 = recoilForShot(ak, 29, false, () => 0.5);
+  check('out-of-range shotIndex reuses last entry', shot30.dPitch === shot29.dPitch);
+
+  // Knife has zero recoil
+  const knife = recoilForShot(getRecoilPattern('knife'), 0, true, () => 0.5);
+  check('knife has no recoil', knife.dPitch === 0 && knife.dYaw === 0);
+
+  // verticalCompensationPerSecond gives a positive number for autos
+  const akComp = verticalCompensationPerSecond(ak, 600);
+  check('ak compensation > 0', akComp > 0);
+  const knifeComp = verticalCompensationPerSecond(getRecoilPattern('knife'), 0);
+  check('knife compensation is 0', knifeComp === 0);
+}
+
 console.log(failures === 0 ? '\nALL SMOKE TESTS PASSED' : `\n${failures} FAILURES`);
 
 // ---------- All maps build and have connected nav graphs ----------
