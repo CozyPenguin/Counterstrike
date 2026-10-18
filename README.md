@@ -29,14 +29,68 @@ Tests (headless smoke test of world, movement, weapons, bot AI):
 npm test
 ```
 
+## Install & host on your Wi-Fi (one command)
+
+`INSTALL-PLAY.sh` (macOS/Linux) and `INSTALL-PLAY.bat` (Windows) do the whole
+job: they check Node.js, install the dependencies when they are missing, build
+the game, start the server **together with the LAN room server**, print every
+address your friends can open and launch the browser.
+
+```bash
+./INSTALL-PLAY.sh              # or double click INSTALL-PLAY.bat
+./INSTALL-PLAY.sh --port 8080  # use a different port
+./INSTALL-PLAY.sh --no-open    # do not open a browser
+./INSTALL-PLAY.sh --dev        # run the dev build with hot reload
+```
+
+The same automation is available as an npm script:
+
+```bash
+npm run host:lan
+```
+
+Output looks like this:
+
+```
+  On this computer : http://localhost:5173
+  On your Wi-Fi   : http://192.168.1.42:5173
+  On your Wi-Fi   : http://10.0.0.5:5173
+```
+
+### Release archive (the zip)
+
+```bash
+npm run pack        # builds the game and writes release/counterstrike-lan-v<version>.zip
+```
+
+The archive is **self contained**: it ships the built game, the room server and
+the two runtime dependencies (`three`, `ws`), so a player only needs
+[Node.js](https://nodejs.org/) — no internet connection, no `npm install`:
+
+```
+counterstrike-lan/
+  INSTALL-PLAY.sh / .bat   double click installer + LAN host
+  INSTALL.md               step by step instructions for players
+  scripts/host-lan.mjs     the automation (install → build → host → print URLs)
+  game/                    the built game that is served to the browsers
+  server/lan.js            the room server (rooms, relay, WebRTC handshake)
+  src/                     map + room rules used by the server
+  node_modules/            the runtime dependencies
+```
+
+`npm run test:pack` builds the archive, checks its contents and starts the game
+from the extracted copy to make sure the shipped installer really works.
+
 ## Multiplayer rooms on the same Wi-Fi
 
 **Only one computer needs to run the server.** Other players open that computer’s
 URL in their browsers. Running a separate server on each computer creates separate
 room lists, even if both computers are on the same Wi-Fi.
 
-1. On the host, run `npm install`, then `npm run dev`.
-   Alternatively, run `npm run build && npm run preview`.
+1. On the host, run `./INSTALL-PLAY.sh` (or `INSTALL-PLAY.bat`) — it installs,
+   builds and starts everything and prints the addresses to share.
+   From a source checkout `npm install && npm run dev` works as well, as does
+   `npm run build && npm run preview`.
 2. Click **MULTIPLAYER**. The room browser displays the host’s network URLs under
    **Playing on the same Wi-Fi?** Share a URL such as `http://192.168.1.42:5173`.
    Do not share `localhost` or `127.0.0.1`: those refer to each player’s own device.
@@ -169,6 +223,9 @@ movement, shooting, kills and the host hand-over when the host leaves.
 
 ```
 index.html          HUD + menu markup
+INSTALL-PLAY.sh     One click installer + LAN host (macOS/Linux)
+INSTALL-PLAY.bat    One click installer + LAN host (Windows)
+INSTALL.md          Player instructions for the release archive
 src/main.js         Game loop, round flow, economy, hit resolution
 src/map.js          Dust-style map, collision AABBs, auto-generated nav graph
 src/player.js       FPS controller (slide collision, step-up, crouch, bob)
@@ -182,9 +239,13 @@ src/room.js         Authoritative room rules (shared by every transport)
 src/lan.js          Multiplayer client base + WebSocket (relay) transport
 src/webrtc.js       WebRTC transport: data channels, signalling, host role
 server/lan.js       Game server: rooms, relay, WebRTC handshake broker
+scripts/host-lan.mjs    Install → build → host automation (npm run host:lan)
+scripts/pack.mjs        Release archive builder (npm run pack)
+scripts/zip.mjs         Dependency free zip reader/writer
 scripts/smoke.mjs   Headless integration smoke test (npm test)
 scripts/lan-test.mjs    Relayed room integration test (npm run test:lan)
 scripts/p2p-test.mjs    Peer-to-peer room integration test (npm run test:p2p)
+scripts/pack-test.mjs   Packaging test (npm run test:pack)
 ```
 
 ## Notes

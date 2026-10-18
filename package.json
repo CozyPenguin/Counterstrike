@@ -8,9 +8,12 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node scripts/smoke.mjs && node scripts/lan-test.mjs && node scripts/p2p-test.mjs",
+    "test": "node scripts/smoke.mjs && node scripts/lan-test.mjs && node scripts/p2p-test.mjs && node scripts/pack-test.mjs",
     "test:lan": "node scripts/lan-test.mjs",
-    "test:p2p": "node scripts/p2p-test.mjs"
+    "test:p2p": "node scripts/p2p-test.mjs",
+    "test:pack": "node scripts/pack-test.mjs",
+    "host:lan": "node scripts/host-lan.mjs",
+    "pack": "node scripts/pack.mjs"
   },
   "dependencies": {
     "three": "^0.180.0",

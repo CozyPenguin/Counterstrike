@@ -30,6 +30,7 @@ export function attachLAN(server) {
     for (const id of rooms.keys()) if (!rooms.get(id).members.size) rooms.delete(id);
   };
   const request = (req, res) => {
+    if (res.writableEnded) return;
     if (req.url?.split('?')[0] !== '/api/rooms') return;
     const port = server.address()?.port || 5173;
     const addresses = [...new Set(Object.values(networkInterfaces()).flat()
@@ -37,6 +38,9 @@ export function attachLAN(server) {
     res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
     res.end(JSON.stringify({ rooms: roomList(), addresses }));
   };
+  // The room list is served by the LAN server itself; the game server only
+  // has to hand over the http server.
+  server.on('request', request);
 
   let sequence = 0;
   let spawnCounter = 0;
