@@ -125,6 +125,14 @@
           <input id="room-name" maxlength="32" placeholder="Room name" value="My LAN Room" />
           <button id="lan-btn">CREATE ROOM</button>
         </div>
+        <div class="lan-method">
+          <label>Connection method</label>
+          <div class="seg" id="lan-method">
+            <button data-val="server" class="on">SERVER RELAY</button>
+            <button data-val="webrtc">WEBRTC P2P</button>
+          </div>
+          <p id="lan-method-hint">Relayed play: every message travels through the host’s game server.</p>
+        </div>
         <div class="room-heading"><b>Available rooms on this host</b><button id="refresh-rooms">REFRESH</button></div>
         <div id="room-list"></div>
         <p id="lan-status" role="status"></p>

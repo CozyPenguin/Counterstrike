@@ -41,10 +41,39 @@ room lists, even if both computers are on the same Wi-Fi.
    **Playing on the same Wi-Fi?** Share a URL such as `http://192.168.1.42:5173`.
    Do not share `localhost` or `127.0.0.1`: those refer to each player’s own device.
    On a hosted preview, everyone can instead open the same preview URL.
-3. Enter your player name and room name, then click **CREATE ROOM**.
+3. Enter your player name and room name, pick a **connection method**, then click
+   **CREATE ROOM**.
 4. Friends open the **same host URL**, click **MULTIPLAYER**, and click **JOIN**
    beside your room. The list updates automatically every three seconds, or via
    **REFRESH**. Click **ENTER GAME** to capture the mouse and play.
+
+### Two connection methods
+
+The multiplayer panel offers two ways to play a room. Both use the exact same
+game rules — only the path of the packets differs.
+
+| Method | Where the game traffic travels | Good for |
+| --- | --- | --- |
+| **SERVER RELAY** (default) | Every message is relayed by the game server on the host. The server stays authoritative for the room. | The simplest setup — it works everywhere the WebSocket works. |
+| **WEBRTC P2P** | The players talk to each other **directly** over a WebRTC data channel. The server only publishes the room list and introduces the players (offer / answer / ICE). | Keeping the game traffic off the server, lower latency, and no server load per room. |
+
+Pick the method when you **create** the room; the room list shows it as
+`RELAY` or `WEBRTC P2P`, and joining always uses the method of that room.
+
+How the peer-to-peer method works:
+
+- The player who creates the room becomes its **host**: their browser runs the
+  authoritative room simulation and replicates the state to everybody else.
+- Every other player opens one WebRTC data channel straight to the host.
+  Movement, shots, kills and respawns travel peer to peer.
+- If the host leaves, the server promotes the next player to host and the room
+  keeps running (scores restart).
+- The room still needs the game server for the room list and for the WebRTC
+  handshake, so run `npm run dev` (or `npm run preview`) on the host as usual.
+- `?nostun=1` in the URL disables the public STUN servers. On a single LAN
+  only host candidates are used anyway; STUN helps when the players sit behind
+  different routers. There is no TURN server, so very restrictive networks
+  cannot be traversed.
 
 ### What the room browser discovers
 
@@ -73,11 +102,13 @@ if the room creator leaves. Each room has its own players, combat, and scores.
 LAN rooms are continuous **free-for-all deathmatch** for up to **10 players** each:
 - AK-47 loadouts with unlimited reserve ammunition; **R** to reload.
 - Server-resolved hits, wall occlusion, headshots, kills/deaths, and **TAB** scores.
+  In a peer-to-peer room the *host* resolves the hits, using the very same rules.
 - Automatic respawn after **3 seconds**, with **2 seconds** of spawn protection.
 - No bots, buy menu, team rounds, or match-win limit in multiplayer.
 - Releasing the mouse does not pause the room or make you invulnerable.
   **ESC → LEAVE LAN GAME** returns to the room browser.
 - Scores reset on reconnect or server restart; rooms are not persistent.
+- Multiplayer always runs on **Dustline** so that every player shares one map.
 
 WebSocket traffic uses the page’s host and port (`/lan`); the room list uses
 `/api/rooms`. Use trusted private networks: there is no account system or full
@@ -86,6 +117,11 @@ anti-cheat (movement is client-driven with server bounds/speed checks).
 Run `npm run test:lan` for integration tests covering room creation/listing,
 isolated state and combat, full/missing rooms, empty-room cleanup, joining,
 shooting, scores, reloads, respawns, and disconnects.
+
+Run `npm run test:p2p` for the peer-to-peer test: it drives the real browser
+code (`src/webrtc.js`) and the real server, with a mocked `RTCPeerConnection`,
+and covers the signalling handshake, the data channel, state synchronisation,
+movement, shooting, kills and the host hand-over when the host leaves.
 
 ## The game
 
@@ -142,7 +178,13 @@ src/effects.js      Tracers, impact sparks, blood, decals (pooled)
 src/hud.js          DOM HUD, buy menu, kill feed, scoreboard
 src/audio.js        Procedural Web Audio sound engine
 src/textures.js     Procedural canvas textures (sand, crates, concrete, …)
+src/room.js         Authoritative room rules (shared by every transport)
+src/lan.js          Multiplayer client base + WebSocket (relay) transport
+src/webrtc.js       WebRTC transport: data channels, signalling, host role
+server/lan.js       Game server: rooms, relay, WebRTC handshake broker
 scripts/smoke.mjs   Headless integration smoke test (npm test)
+scripts/lan-test.mjs    Relayed room integration test (npm run test:lan)
+scripts/p2p-test.mjs    Peer-to-peer room integration test (npm run test:p2p)
 ```
 
 ## Notes
