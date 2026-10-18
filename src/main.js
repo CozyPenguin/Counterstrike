@@ -6,6 +6,7 @@ import { Bot } from './bots.js';
 import { Effects } from './effects.js';
 import { HUD } from './hud.js';
 import { Sound } from './audio.js';
+import { LANClient } from './lan.js';
 import { skyTexture } from './textures.js';
 
 // ================= Renderer / Scene =================
@@ -90,6 +91,7 @@ const game = {
 };
 
 let bots = [];
+let lan = null;
 const input = {
   forward: false, back: false, left: false, right: false,
   jump: false, crouch: false, walk: false,
@@ -114,6 +116,7 @@ const keyMap = {
 };
 
 window.addEventListener('keydown', (e) => {
+  if (e.target instanceof HTMLInputElement) return;
   if (e.code === 'Tab') {
     e.preventDefault();
     tabHeld = true;
@@ -138,23 +141,29 @@ window.addEventListener('keydown', (e) => {
       }
       break;
     case 'KeyR':
-      if (game.state === 'live' || game.state === 'buy') weapons.startReload();
+      if (game.state === 'live' || game.state === 'buy') {
+        if (weapons.startReload() && lan) lan.send({ type: 'reload' });
+      }
       break;
     case 'KeyB':
       toggleBuyMenu();
       break;
     case 'KeyQ':
+      if (lan) break;
       weapons.swapToLast();
       break;
     case 'Digit1':
+      if (lan) break;
       if (buyMenuOpen) buyByKey('1');
       else weapons.selectSlot('primary');
       break;
     case 'Digit2':
+      if (lan) break;
       if (buyMenuOpen) buyByKey('2');
       else weapons.selectSlot('pistol');
       break;
     case 'Digit3':
+      if (lan) break;
       if (buyMenuOpen) buyByKey('3');
       else weapons.selectSlot('knife');
       break;
@@ -212,6 +221,9 @@ window.addEventListener('mousemove', (e) => {
 
 document.addEventListener('pointerlockchange', () => {
   const locked = document.pointerLockElement === canvas;
+  if (!locked) {
+    for (const key of Object.keys(input)) input[key] = false;
+  }
   if (!locked && game.state !== 'menu' && game.state !== 'matchEnd' && !buyMenuOpen) {
     paused = true;
     hud.el.pauseMenu.classList.remove('hidden');
@@ -270,9 +282,76 @@ document.addEventListener('pointerlockerror', () => {
   }
 });
 
+
+// LAN deathmatch runs continuously on the host, even when a browser releases its mouse.
+function lanSpawn(message) {
+  player.respawn(new THREE.Vector3(...message.pos), 0);
+  game.hp = 100; game.armor = 0;
+  weapons.giveWeapon('ak47');
+  weapons.reloading = false; weapons.cooldown = 0;
+  hud.showSpectator(false);
+  hud.announce('LAN DEATHMATCH · 2s spawn protection', 'neutral', 2);
+}
+function lanMessage(m) {
+  if (!lan) return;
+  if (m.type === 'spawn') lanSpawn(m);
+  if (m.type === 'correct') player.pos.fromArray(m.pos);
+  if (m.type === 'state') {
+    const me = m.players.find(p => p.id === lan.id);
+    if (me) {
+      if (me.hp < game.hp) { hud.showDamage(0); sound.flesh(); }
+      game.hp = me.hp; player.dead = me.hp <= 0;
+      hud.showSpectator(player.dead);
+    }
+    hud.el.roundInfo.textContent = `LAN DEATHMATCH · ${m.players.length}/10 PLAYERS · TAB FOR SCORES`;
+  }
+  if (m.type === 'shot') {
+    effects.spawnTracer(new THREE.Vector3(...m.from), new THREE.Vector3(...m.to));
+    if (m.id !== lan.id) sound.shot('rifle', 0, 0.4);
+  }
+  if (m.type === 'hit') { hud.showHitmarker(m.killed); sound.hit(); }
+  if (m.type === 'kill') {
+    hud.addKillFeed(m.killer, m.victim, 'AK-47', m.head, false, false);
+    hud.announce(`${m.killer} eliminated ${m.victim}`, 'neutral', 2);
+  }
+}
+function leaveLAN() {
+  lan?.dispose(); lan = null;
+  leaveButton.hidden = true;
+  game.state = 'menu'; paused = false;
+  hud.showHUD(false); hud.showSpectator(false); hud.showScoreboard(false);
+  hud.el.pauseMenu.classList.add('hidden');
+  hud.el.mainMenu.classList.remove('hidden');
+  document.exitPointerLock();
+  document.getElementById('lan-status').textContent = 'Disconnected. Join again to reconnect.';
+}
+document.getElementById('lan-btn').addEventListener('click', async () => {
+  const button = document.getElementById('lan-btn');
+  const status = document.getElementById('lan-status');
+  button.disabled = true; status.textContent = 'Connecting…';
+  const client = new LANClient({ scene, world, onMessage: lanMessage, onClose: leaveLAN });
+  try {
+    const spawn = await client.connect(document.getElementById('lan-name').value);
+    lan = client; leaveButton.hidden = false; clearBots(); effects.clear(); sound.init();
+    game.state = 'live'; game.money = 0; game.roundTime = 115;
+    buyMenuOpen = false; paused = false;
+    for (const key of Object.keys(input)) input[key] = false;
+    hud.showBuyMenu(false); hud.showHUD(true); hud.setScore(0, 0);
+    hud.el.mainMenu.classList.add('hidden');
+    lanSpawn(spawn); lockPointer(); status.textContent = '';
+  } catch (error) { client.dispose(); status.textContent = error.message; }
+  finally { button.disabled = false; }
+});
+const leaveButton = document.createElement('button');
+leaveButton.textContent = 'LEAVE LAN GAME';
+leaveButton.hidden = true;
+leaveButton.addEventListener('click', () => { if (lan) leaveLAN(); });
+document.querySelector('#pause-menu .menu-inner').appendChild(leaveButton);
+
 // ================= Buy logic =================
 
 function toggleBuyMenu() {
+  if (lan) return;
   if (game.state !== 'buy' && game.state !== 'live') return;
   if (game.state === 'live' && game.roundTime < 115 - 20) {
     // late in the round: buying disabled
@@ -304,6 +383,7 @@ function buyByKey(key) {
 }
 
 function tryBuy(id) {
+  if (lan) return;
   if (game.state !== 'buy' && game.state !== 'live') return;
   if (game.state === 'live' && game.roundTime < 115 - 20) return;
 
@@ -623,6 +703,7 @@ function botShoot(bot) {
 // ================= Scoreboard =================
 
 function scoreboardRows() {
+  if (lan) return lan.players.map(p => ({ name: p.name, ct: false, me: p.id === lan.id, kills: p.kills, deaths: p.deaths, score: p.kills * 2 - p.deaths }));
   const rows = [{
     name: 'You', ct: true, me: true,
     kills: game.kills, deaths: game.deaths, score: game.kills * 2 - game.deaths,
@@ -673,7 +754,10 @@ function update() {
     const wantFire = def.auto ? input.fire : input.firePressed;
     if (wantFire) {
       const shot = weapons.fire(player, player.speed2D > 0.5, !player.onGround, player.crouching);
-      if (shot) resolvePlayerShot(shot);
+      if (shot) {
+        if (lan) lan.send({ type: 'shot', dir: shot.dir.toArray() });
+        else resolvePlayerShot(shot);
+      }
     }
   }
   input.firePressed = false;
@@ -698,7 +782,11 @@ function update() {
   }
 
   // ---- round timers ----
-  if (game.state === 'buy') {
+  if (lan) {
+    weapons.current.reserve = 90; // Unlimited reserve ammunition in deathmatch.
+    lan.update(rawDt, player);
+    if (tabHeld) hud.showScoreboard(true, scoreboardRows());
+  } else if (game.state === 'buy') {
     game.buyTime -= dt;
     if (buyMenuOpen) {
       hud.buyTimeLeft = game.buyTime;
@@ -738,7 +826,8 @@ function update() {
 
   // ---- HUD ----
   hud.update(rawDt);
-  hud.setTimer(game.state === 'buy' ? game.buyTime : game.roundTime);
+  if (lan) hud.el.timer.textContent = 'LAN';
+  else hud.setTimer(game.state === 'buy' ? game.buyTime : game.roundTime);
   hud.setHealth(game.hp, game.armor);
   const w = weapons.current;
   hud.setAmmo(w.mag, w.reserve, w.def.name, w.def.mag === Infinity);
